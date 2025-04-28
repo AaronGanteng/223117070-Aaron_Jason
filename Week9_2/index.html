@@ -1,0 +1,718 @@
+<!DOCTYPE html>
+<html lang="id">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>WebGL 2 - Balok Tekstur Berulang & Searah</title>
+    {/* Judul Diubah */}
+    <style>
+      html,
+      body {
+        margin: 0;
+        padding: 0;
+        overflow: hidden;
+        background-color: #222;
+      }
+      canvas {
+        display: block;
+        width: 100vw;
+        height: 100vh;
+      }
+    </style>
+    <script src="https://cdn.jsdelivr.net/npm/gl-matrix@3.4.3/gl-matrix-min.js"></script>
+  </head>
+  <body>
+    <canvas id="webgl-canvas"></canvas>
+
+    {/* === Shader Tetap Sama === */}
+    <script id="vertex-shader" type="x-shader/x-vertex">
+      #version 300 es
+      precision mediump float;
+      in vec3 a_position;
+      in vec2 a_texcoord;
+      uniform mat4 u_projectionMatrix;
+      uniform mat4 u_viewMatrix;
+      uniform mat4 u_modelMatrix;
+      out vec2 v_texcoord;
+      void main() {
+          gl_Position = u_projectionMatrix * u_viewMatrix * u_modelMatrix * vec4(a_position, 1.0);
+          v_texcoord = a_texcoord;
+      }
+    </script>
+    <script id="fragment-shader" type="x-shader/x-fragment">
+      #version 300 es
+      precision mediump float;
+      in vec2 v_texcoord;
+      uniform sampler2D u_texture;
+      out vec4 outColor;
+      void main() {
+          // Cek jika koordinat di luar [0,1] untuk debug (opsional)
+          // if (v_texcoord.x < 0.0 || v_texcoord.x > 2.0 || v_texcoord.y < 0.0 || v_texcoord.y > 1.0) {
+          //     outColor = vec4(1.0, 0.0, 0.0, 1.0); // Merah jika di luar ekspektasi (non-repeat)
+          // } else {
+              outColor = texture(u_texture, v_texcoord);
+          // }
+      }
+    </script>
+
+    <script>
+      // --- Variabel Global (Sama) ---
+      let gl;
+      let shaderProgram;
+      let vao;
+      let indexBuffer;
+      let positionBuffer;
+      let texCoordBuffer;
+      let texture = null;
+      let indicesLength;
+      let positionAttributeLocation;
+      let texCoordAttributeLocation;
+      let projectionMatrixUniformLocation;
+      let viewMatrixUniformLocation;
+      let modelMatrixUniformLocation;
+      let textureUniformLocation;
+      const projectionMatrix = glMatrix.mat4.create();
+      const viewMatrix = glMatrix.mat4.create();
+      const modelMatrix = glMatrix.mat4.create();
+      let lastTime = 0;
+      let rotationAngle = 0;
+      const textureUrl = "B.jpeg";
+
+      // --- Fungsi Utama (Sama) ---
+      async function main() {
+        const canvas = document.getElementById("webgl-canvas");
+        gl = canvas.getContext("webgl2");
+        if (!gl) {
+          console.error("WebGL 2 tidak didukung.");
+          alert("WebGL 2 tidak didukung.");
+          return;
+        }
+        if (!setupShaders()) {
+          console.error("Gagal setup shader.");
+          return;
+        }
+        setupGeometryAndBuffers(); // Panggil SETELAH shaders
+        try {
+          texture = await loadTexture(textureUrl);
+          console.log("Tekstur utama berhasil dimuat.");
+        } catch (error) {
+          console.error(`Gagal memuat tekstur dari ${textureUrl}:`, error);
+          texture = createPlaceholderTexture();
+          console.warn("Menggunakan tekstur placeholder.");
+        }
+        gl.enable(gl.DEPTH_TEST);
+        gl.depthFunc(gl.LEQUAL);
+        gl.clearColor(0.2, 0.2, 0.2, 1.0);
+        setupMatrices(canvas);
+        window.addEventListener("resize", handleResize);
+        handleResize();
+        requestAnimationFrame(render);
+      }
+
+      // --- Fungsi Pembantu Shader (Sama) ---
+      function setupShaders() {
+        /* ... (kode sama persis seperti sebelumnya) ... */
+        const vsSrc = document
+          .getElementById("vertex-shader")
+          .textContent.trim();
+        const fsSrc = document
+          .getElementById("fragment-shader")
+          .textContent.trim();
+        const vs = compileShader(gl, gl.VERTEX_SHADER, vsSrc);
+        const fs = compileShader(gl, gl.FRAGMENT_SHADER, fsSrc);
+        if (!vs || !fs) {
+          shaderProgram = null;
+          return false;
+        }
+        shaderProgram = createProgram(gl, vs, fs);
+        if (!shaderProgram) {
+          return false;
+        }
+        positionAttributeLocation = gl.getAttribLocation(
+          shaderProgram,
+          "a_position"
+        );
+        texCoordAttributeLocation = gl.getAttribLocation(
+          shaderProgram,
+          "a_texcoord"
+        );
+        projectionMatrixUniformLocation = gl.getUniformLocation(
+          shaderProgram,
+          "u_projectionMatrix"
+        );
+        viewMatrixUniformLocation = gl.getUniformLocation(
+          shaderProgram,
+          "u_viewMatrix"
+        );
+        modelMatrixUniformLocation = gl.getUniformLocation(
+          shaderProgram,
+          "u_modelMatrix"
+        );
+        textureUniformLocation = gl.getUniformLocation(
+          shaderProgram,
+          "u_texture"
+        );
+        if (positionAttributeLocation === -1)
+          console.warn("Attr 'a_position' not found.");
+        if (texCoordAttributeLocation === -1)
+          console.warn("Attr 'a_texcoord' not found.");
+        if (!projectionMatrixUniformLocation)
+          console.warn("Uniform 'u_projectionMatrix' not found.");
+        if (!viewMatrixUniformLocation)
+          console.warn("Uniform 'u_viewMatrix' not found.");
+        if (!modelMatrixUniformLocation)
+          console.warn("Uniform 'u_modelMatrix' not found.");
+        if (!textureUniformLocation)
+          console.warn("Uniform 'u_texture' not found.");
+        console.log("Shader OK.");
+        return true;
+      }
+      function compileShader(gl, type, source) {
+        /* ... (kode sama persis seperti sebelumnya) ... */
+        const s = gl.createShader(type);
+        gl.shaderSource(s, source);
+        gl.compileShader(s);
+        if (!gl.getShaderParameter(s, gl.COMPILE_STATUS)) {
+          console.error(
+            `Shader compile error (${
+              type === gl.VERTEX_SHADER ? "VS" : "FS"
+            }):\n${gl.getShaderInfoLog(s)}`
+          );
+          console.error(
+            "Source:\n" +
+              source
+                .split("\n")
+                .map((l, i) => `${(i + 1 + "").padStart(3)}: ${l}`)
+                .join("\n")
+          );
+          gl.deleteShader(s);
+          return null;
+        }
+        return s;
+      }
+      function createProgram(gl, vs, fs) {
+        /* ... (kode sama persis seperti sebelumnya) ... */
+        const p = gl.createProgram();
+        gl.attachShader(p, vs);
+        gl.attachShader(p, fs);
+        gl.linkProgram(p);
+        gl.detachShader(p, vs);
+        gl.detachShader(p, fs);
+        gl.deleteShader(vs);
+        gl.deleteShader(fs);
+        if (!gl.getProgramParameter(p, gl.LINK_STATUS)) {
+          console.error("Program link error:", gl.getProgramInfoLog(p));
+          gl.deleteProgram(p);
+          return null;
+        }
+        return p;
+      }
+
+      // --- **** GEOMETRI TETAP, UV DIPERBAIKI UNTUK ORIENTASI **** ---
+      function setupGeometryAndBuffers() {
+        if (
+          positionAttributeLocation === undefined ||
+          texCoordAttributeLocation === undefined
+        ) {
+          console.error(
+            "Lokasi atribut belum siap saat setupGeometryAndBuffers."
+          );
+          return;
+        }
+
+        // Posisi Vertex Balok (Panjang 2x di Z)
+        const W = 0.5;
+        const H = 0.5;
+        const D = 1.0;
+        const positions = new Float32Array([
+          // Depan (Z+) (0-3) Counter-Clockwise from bottom-left
+          -W,
+          -H,
+          D,
+          W,
+          -H,
+          D,
+          W,
+          H,
+          D,
+          -W,
+          H,
+          D,
+          // Belakang (Z-) (4-7) CCW from bottom-right (viewed from outside)
+          W,
+          -H,
+          -D,
+          -W,
+          -H,
+          -D,
+          -W,
+          H,
+          -D,
+          W,
+          H,
+          -D, // Urutan diubah agar CCW dari luar
+          // Atas (Y+) (8-11) CCW from back-left
+          -W,
+          H,
+          -D,
+          -W,
+          H,
+          D,
+          W,
+          H,
+          D,
+          W,
+          H,
+          -D,
+          // Bawah (Y-) (12-15) CCW from front-left
+          -W,
+          -H,
+          D,
+          W,
+          -H,
+          D,
+          W,
+          -H,
+          -D,
+          -W,
+          -H,
+          -D, // Urutan diubah
+          // Kanan (X+) (16-19) CCW from back-bottom
+          W,
+          -H,
+          -D,
+          W,
+          H,
+          -D,
+          W,
+          H,
+          D,
+          W,
+          -H,
+          D,
+          // Kiri (X-) (20-23) CCW from front-bottom
+          -W,
+          -H,
+          D,
+          -W,
+          H,
+          D,
+          -W,
+          H,
+          -D,
+          -W,
+          -H,
+          -D, // Urutan diubah
+        ]);
+
+        // --- Koordinat Tekstur (UV) - Disesuaikan untuk Orientasi ---
+        // Tujuan: 'Atas' huruf B selalu ke arah +Y global.
+        //         2x repeat di sisi panjang (X atau Z), 1x di sisi pendek.
+        const texCoords = new Float32Array([
+          // Depan (0-3): U=X(0..2), V=Y(0..1). B tegak.
+          0.0,
+          0.0,
+          2.0,
+          0.0,
+          2.0,
+          1.0,
+          0.0,
+          1.0,
+          // Belakang (4-7): U=X(0..2), V=Y(0..1). Agar B tegak & tidak mirror, U dibalik.
+          // Vertex order: (W,-H,-D), (-W,-H,-D), (-W,H,-D), (W,H,-D)
+          0.0,
+          0.0,
+          2.0,
+          0.0,
+          2.0,
+          1.0,
+          0.0,
+          1.0, // UV: (0,0) (2,0) (2,1) (0,1)
+          // Atas (8-11): U=X(0..1), V=Z(0..2). 'Atas' B ke arah X+.
+          // Vertex order: (-W,H,-D), (-W,H,D), (W,H,D), (W,H,-D)
+          0.0,
+          0.0,
+          0.0,
+          2.0,
+          1.0,
+          2.0,
+          1.0,
+          0.0, // UV: (V=X, U=Z): (0,0),(0,2),(1,2),(1,0) -> Atas B ke +X
+          // Bawah (12-15): U=X(0..1), V=Z(0..2). 'Atas' B ke arah X+. V dibalik agar tidak terbalik dari Atas.
+          // Vertex order: (-W,-H,D), (W,-H,D), (W,-H,-D), (-W,-H,-D)
+          0.0,
+          2.0,
+          1.0,
+          2.0,
+          1.0,
+          0.0,
+          0.0,
+          0.0, // UV: (V=X, U=Z): (0,2),(1,2),(1,0),(0,0) -> Atas B ke +X
+          // Kanan (X+) (16-19): U=Z(0..1), V=Y(0..1). B tegak.
+          // Vertex order: (W,-H,-D), (W,H,-D), (W,H,D), (W,-H,D)
+          0.0,
+          0.0,
+          0.0,
+          1.0,
+          1.0,
+          1.0,
+          1.0,
+          0.0, // UV: (U=Z, V=Y): (0,0),(0,1),(1,1),(1,0)
+          // Kiri (X-) (20-23): U=Z(0..1), V=Y(0..1). Agar B tegak & tidak mirror, U dibalik.
+          // Vertex order: (-W,-H,D), (-W,H,D), (-W,H,-D), (-W,-H,-D)
+          0.0,
+          0.0,
+          0.0,
+          1.0,
+          1.0,
+          1.0,
+          1.0,
+          0.0, // UV: (U=Z, V=Y): (0,0),(0,1),(1,1),(1,0) -> U perlu dibalik? -> Coba dulu
+        ]);
+
+        // --- Ulangi percobaan UV mapping dengan fokus pada Y+ sebagai 'atas' ---
+        const texCoordsRevised = new Float32Array([
+          // Depan (0-3): Vertices (-W,-H,D), (W,-H,D), (W,H,D), (-W,H,D)
+          // UV Map: U=X(0..2), V=Y(0..1). B tegak.
+          0.0,
+          0.0,
+          2.0,
+          0.0,
+          2.0,
+          1.0,
+          0.0,
+          1.0,
+
+          // Belakang (4-7): Vertices (W,-H,-D), (-W,-H,-D), (-W,H,-D), (W,H,-D)
+          // UV Map: U=X(2..0), V=Y(0..1). B tegak, tidak mirror.
+          2.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          1.0,
+          2.0,
+          1.0,
+
+          // Atas (8-11): Vertices (-W,H,-D), (-W,H,D), (W,H,D), (W,H,-D)
+          // UV Map: U=X(0..1), V=Z(0..2). B 'tidur', atasnya ke +X. TIDAK SESUAI.
+          // Ingin B tegak (atas ke +Y), berarti V=Y, U=X atau Z.
+          // Sisi ini panjang di Z (U=Z(0..2)), lebar di X (V=X(0..1)). Atas B ke +X?
+          // Mari coba U=Z(0..2), V=X(0..1). Atas B ke +X.
+          0.0,
+          0.0,
+          2.0,
+          0.0,
+          2.0,
+          1.0,
+          0.0,
+          1.0, // Vtx Z: -D,D,D,-D | Vtx X: -W,-W,W,W -> UV (U=Z, V=X): (0,0), (2,0), (2,1), (0,1)
+
+          // Bawah (12-15): Vertices (-W,-H,D), (W,-H,D), (W,-H,-D), (-W,-H,-D)
+          // UV Map: U=Z(0..2), V=X(1..0). B tegak (atas ke +X), tidak terbalik dari atas.
+          0.0,
+          1.0,
+          2.0,
+          1.0,
+          2.0,
+          0.0,
+          0.0,
+          0.0, // Vtx Z: D,D,-D,-D | Vtx X: -W,W,W,-W -> UV (U=Z, V=X): (2,1)? -> Coba: (0,1), (2,1), (2,0), (0,0)
+
+          // Kanan (X+) (16-19): Vertices (W,-H,-D), (W,H,-D), (W,H,D), (W,-H,D)
+          // UV Map: U=Z(0..1), V=Y(0..1). B tegak (atas ke +Y).
+          0.0,
+          0.0,
+          0.0,
+          1.0,
+          1.0,
+          1.0,
+          1.0,
+          0.0, // Vtx Z: -D,-D,D,D | Vtx Y: -H,H,H,-H -> UV (U=Z, V=Y): (0,0), (0,1), (1,1), (1,0)
+
+          // Kiri (X-) (20-23): Vertices (-W,-H,D), (-W,H,D), (-W,H,-D), (-W,-H,-D)
+          // UV Map: U=Z(1..0), V=Y(0..1). B tegak (atas ke +Y), tidak mirror.
+          1.0,
+          0.0,
+          1.0,
+          1.0,
+          0.0,
+          1.0,
+          0.0,
+          0.0, // Vtx Z: D,D,-D,-D | Vtx Y: -H,H,H,-H -> UV (U=Z, V=Y): (1,0), (1,1), (0,1), (0,0)
+        ]);
+
+        // Indeks (Pastikan sesuai dengan urutan vertex baru)
+        const indices = new Uint16Array([
+          0,
+          1,
+          2,
+          0,
+          2,
+          3, // Depan
+          4,
+          5,
+          6,
+          4,
+          6,
+          7, // Belakang
+          8,
+          9,
+          10,
+          8,
+          10,
+          11, // Atas
+          12,
+          13,
+          14,
+          12,
+          14,
+          15, // Bawah
+          16,
+          17,
+          18,
+          16,
+          18,
+          19, // Kanan
+          20,
+          21,
+          22,
+          20,
+          22,
+          23, // Kiri
+        ]);
+        indicesLength = indices.length;
+
+        // --- Setup VAO dan Buffer ---
+        vao = gl.createVertexArray();
+        gl.bindVertexArray(vao);
+        positionBuffer = gl.createBuffer();
+        gl.bindBuffer(gl.ARRAY_BUFFER, positionBuffer);
+        gl.bufferData(gl.ARRAY_BUFFER, positions, gl.STATIC_DRAW);
+        gl.enableVertexAttribArray(positionAttributeLocation);
+        gl.vertexAttribPointer(
+          positionAttributeLocation,
+          3,
+          gl.FLOAT,
+          false,
+          0,
+          0
+        );
+        texCoordBuffer = gl.createBuffer();
+        gl.bindBuffer(gl.ARRAY_BUFFER, texCoordBuffer);
+        // Gunakan texCoordsRevised yang sudah diperbaiki
+        gl.bufferData(gl.ARRAY_BUFFER, texCoordsRevised, gl.STATIC_DRAW);
+        gl.enableVertexAttribArray(texCoordAttributeLocation);
+        gl.vertexAttribPointer(
+          texCoordAttributeLocation,
+          2,
+          gl.FLOAT,
+          false,
+          0,
+          0
+        );
+        indexBuffer = gl.createBuffer();
+        gl.bindBuffer(gl.ELEMENT_ARRAY_BUFFER, indexBuffer);
+        gl.bufferData(gl.ELEMENT_ARRAY_BUFFER, indices, gl.STATIC_DRAW);
+        gl.bindVertexArray(null);
+        gl.bindBuffer(gl.ARRAY_BUFFER, null);
+        gl.bindBuffer(gl.ELEMENT_ARRAY_BUFFER, null);
+        console.log("Geometri Balok (UV Searah) dan buffer OK.");
+      }
+
+      // --- Fungsi Tekstur (Pastikan REPEAT aktif) ---
+      function createPlaceholderTexture() {
+        /* ... (kode sama persis, pastikan REPEAT) ... */
+        const t = gl.createTexture();
+        gl.bindTexture(gl.TEXTURE_2D, t);
+        const p = new Uint8Array([128, 0, 128, 255]);
+        gl.texImage2D(
+          gl.TEXTURE_2D,
+          0,
+          gl.RGBA,
+          1,
+          1,
+          0,
+          gl.RGBA,
+          gl.UNSIGNED_BYTE,
+          p
+        );
+        gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.REPEAT);
+        gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.REPEAT); // REPEAT
+        gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.NEAREST);
+        gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.NEAREST);
+        gl.bindTexture(gl.TEXTURE_2D, null);
+        return t;
+      }
+      function loadTexture(url) {
+        /* ... (kode sama persis, pastikan REPEAT di onload) ... */
+        const tex = gl.createTexture();
+        gl.bindTexture(gl.TEXTURE_2D, tex);
+        const pixel = new Uint8Array([128, 0, 128, 255]);
+        gl.texImage2D(
+          gl.TEXTURE_2D,
+          0,
+          gl.RGBA,
+          1,
+          1,
+          0,
+          gl.RGBA,
+          gl.UNSIGNED_BYTE,
+          pixel
+        );
+        gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.REPEAT);
+        gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.REPEAT);
+        return new Promise((resolve, reject) => {
+          const image = new Image();
+          image.onload = function () {
+            console.log(
+              `Gambar ${url} loaded (${image.width}x${image.height}). Uploading...`
+            );
+            gl.bindTexture(gl.TEXTURE_2D, tex);
+            gl.pixelStorei(gl.UNPACK_FLIP_Y_WEBGL, true);
+            gl.texImage2D(
+              gl.TEXTURE_2D,
+              0,
+              gl.RGBA,
+              gl.RGBA,
+              gl.UNSIGNED_BYTE,
+              image
+            );
+            gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.REPEAT);
+            /*PENTING*/ gl.texParameteri(
+              gl.TEXTURE_2D,
+              gl.TEXTURE_WRAP_T,
+              gl.REPEAT
+            ); /*PENTING*/
+            if (isPowerOf2(image.width) && isPowerOf2(image.height)) {
+              console.log("Texture PoT, mipmaps generated.");
+              gl.generateMipmap(gl.TEXTURE_2D);
+              gl.texParameteri(
+                gl.TEXTURE_2D,
+                gl.TEXTURE_MIN_FILTER,
+                gl.LINEAR_MIPMAP_LINEAR
+              );
+              gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.LINEAR);
+            } else {
+              console.warn("Texture not PoT.");
+              gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.LINEAR);
+              gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.LINEAR);
+            }
+            URL.revokeObjectURL(image.src);
+            gl.bindTexture(gl.TEXTURE_2D, null);
+            resolve(tex);
+          };
+          image.onerror = function (e) {
+            URL.revokeObjectURL(image.src);
+            console.error(`Image load error: ${url}`, e);
+            gl.bindTexture(gl.TEXTURE_2D, null);
+            reject(new Error(`Failed load image: ${url}`));
+          };
+          console.log(`Fetching: ${url}`);
+          fetch(url)
+            .then((r) => {
+              console.log(`Fetch status: ${r.status}`);
+              if (!r.ok) throw new Error(`HTTP error ${r.status}`);
+              return r.blob();
+            })
+            .then((b) => {
+              console.log(`Blob received, creating URL...`);
+              image.src = URL.createObjectURL(b);
+              console.log(`Object URL: ${image.src}. Waiting onload...`);
+            })
+            .catch((err) => {
+              console.error(`Fetch/Blob error:`, err);
+              gl.bindTexture(gl.TEXTURE_2D, null);
+              reject(err);
+            });
+        });
+      }
+      function isPowerOf2(v) {
+        return (v & (v - 1)) === 0;
+      }
+
+      // --- Fungsi Matriks & Resize (Sama) ---
+      function setupMatrices(c) {
+        /* ... kode sama ... */
+        const fov = (45 * Math.PI) / 180;
+        const aspect = c.clientWidth / c.clientHeight || 1;
+        const zn = 0.1;
+        const zf = 100.0;
+        glMatrix.mat4.perspective(projectionMatrix, fov, aspect, zn, zf);
+        const camPos = [0, 1.5, 4];
+        /* Naik sedikit & Mundur */ const lookAt = [0, 0, 0];
+        const up = [0, 1, 0];
+        glMatrix.mat4.lookAt(viewMatrix, camPos, lookAt, up);
+        glMatrix.mat4.identity(modelMatrix);
+      }
+      function handleResize() {
+        /* ... kode sama ... */
+        if (resizeCanvasToDisplaySize(gl.canvas)) {
+          console.log(`Resized: ${gl.canvas.width}x${gl.canvas.height}`);
+          gl.viewport(0, 0, gl.drawingBufferWidth, gl.drawingBufferHeight);
+          const aspect = gl.canvas.clientWidth / gl.canvas.clientHeight;
+          const fov = (45 * Math.PI) / 180;
+          const zn = 0.1;
+          const zf = 100.0;
+          glMatrix.mat4.perspective(projectionMatrix, fov, aspect, zn, zf);
+          return true;
+        }
+        return false;
+      }
+      function resizeCanvasToDisplaySize(c) {
+        /* ... kode sama ... */
+        const dw = c.clientWidth;
+        const dh = c.clientHeight;
+        if (c.width !== dw || c.height !== dh) {
+          c.width = dw;
+          c.height = dh;
+          return true;
+        }
+        return false;
+      }
+
+      // --- Fungsi Render (Sama) ---
+      function render(time) {
+        /* ... kode sama ... */
+        requestAnimationFrame(render);
+        if (!shaderProgram || !texture) {
+          return;
+        }
+        time *= 0.001;
+        const dt = time - lastTime;
+        lastTime = time;
+        handleResize();
+        rotationAngle += dt * 0.3;
+        /* Perlambat lagi */ glMatrix.mat4.identity(modelMatrix);
+        glMatrix.mat4.rotate(
+          modelMatrix,
+          modelMatrix,
+          rotationAngle,
+          [0, 1, 0]
+        ); /* Rotasi Y saja agar mudah dilihat */
+        // glMatrix.mat4.rotate(modelMatrix,modelMatrix,rotationAngle*0.5,[1,0,1]);
+        gl.clear(gl.COLOR_BUFFER_BIT | gl.DEPTH_BUFFER_BIT);
+        gl.useProgram(shaderProgram);
+        gl.bindVertexArray(vao);
+        gl.uniformMatrix4fv(
+          projectionMatrixUniformLocation,
+          false,
+          projectionMatrix
+        );
+        gl.uniformMatrix4fv(viewMatrixUniformLocation, false, viewMatrix);
+        gl.uniformMatrix4fv(modelMatrixUniformLocation, false, modelMatrix);
+        gl.activeTexture(gl.TEXTURE0);
+        gl.bindTexture(gl.TEXTURE_2D, texture);
+        gl.uniform1i(textureUniformLocation, 0);
+        gl.drawElements(gl.TRIANGLES, indicesLength, gl.UNSIGNED_SHORT, 0);
+        gl.bindVertexArray(null);
+      }
+
+      // --- Mulai Aplikasi (Sama) ---
+      main().catch((err) => {
+        console.error("Fatal error:", err);
+        alert("WebGL App failed. Check console (F12).");
+      });
+    </script>
+  </body>
+</html>
