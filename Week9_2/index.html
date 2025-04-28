@@ -3,7 +3,7 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>WebGL 2 - Balok Tekstur 2x Semua Sisi</title>
+    <title>WebGL 2 - Balok Tekstur Berulang (1x Pendek, 2x Panjang)</title>
     {/* Judul Diubah */}
     <style>
       html,
@@ -28,8 +28,11 @@
     <script id="vertex-shader" type="x-shader/x-vertex">
       #version 300 es
       precision mediump float;
-      in vec3 a_position; in vec2 a_texcoord;
-      uniform mat4 u_projectionMatrix; uniform mat4 u_viewMatrix; uniform mat4 u_modelMatrix;
+      in vec3 a_position;
+      in vec2 a_texcoord;
+      uniform mat4 u_projectionMatrix;
+      uniform mat4 u_viewMatrix;
+      uniform mat4 u_modelMatrix;
       out vec2 v_texcoord;
       void main() {
           gl_Position = u_projectionMatrix * u_viewMatrix * u_modelMatrix * vec4(a_position, 1.0);
@@ -39,9 +42,16 @@
     <script id="fragment-shader" type="x-shader/x-fragment">
       #version 300 es
       precision mediump float;
-      in vec2 v_texcoord; uniform sampler2D u_texture; out vec4 outColor;
+      in vec2 v_texcoord;
+      uniform sampler2D u_texture;
+      out vec4 outColor;
       void main() {
-          outColor = texture(u_texture, v_texcoord);
+          // Cek jika koordinat di luar [0,1] atau [0,2] untuk debug (opsional)
+          // if (v_texcoord.x < 0.0 || v_texcoord.x > 2.0 || v_texcoord.y < 0.0 || v.texcoord.y > 1.0) {
+          //     outColor = vec4(1.0, 0.0, 0.0, 1.0); // Merah jika di luar ekspektasi
+          // } else {
+              outColor = texture(u_texture, v_texcoord);
+          // }
       }
     </script>
 
@@ -73,21 +83,22 @@
         const canvas = document.getElementById("webgl-canvas");
         gl = canvas.getContext("webgl2");
         if (!gl) {
-          alert("WebGL 2 not supported.");
+          console.error("WebGL 2 tidak didukung.");
+          alert("WebGL 2 tidak didukung.");
           return;
         }
         if (!setupShaders()) {
-          alert("Shader setup failed.");
+          console.error("Gagal setup shader.");
           return;
         }
-        setupGeometryAndBuffers();
+        setupGeometryAndBuffers(); // Panggil SETELAH shaders
         try {
           texture = await loadTexture(textureUrl);
-          console.log("Texture loaded.");
+          console.log("Tekstur utama berhasil dimuat.");
         } catch (error) {
-          console.error(`Texture load failed: ${textureUrl}`, error);
+          console.error(`Gagal memuat tekstur dari ${textureUrl}:`, error);
           texture = createPlaceholderTexture();
-          console.warn("Using placeholder texture.");
+          console.warn("Menggunakan tekstur placeholder.");
         }
         gl.enable(gl.DEPTH_TEST);
         gl.depthFunc(gl.LEQUAL);
@@ -100,7 +111,7 @@
 
       // --- Fungsi Pembantu Shader (Sama) ---
       function setupShaders() {
-        /* ... kode sama ... */
+        /* ... (kode sama persis seperti sebelumnya) ... */
         const vsSrc = document
           .getElementById("vertex-shader")
           .textContent.trim();
@@ -157,7 +168,7 @@
         return true;
       }
       function compileShader(gl, type, source) {
-        /* ... kode sama ... */
+        /* ... (kode sama persis seperti sebelumnya) ... */
         const s = gl.createShader(type);
         gl.shaderSource(s, source);
         gl.compileShader(s);
@@ -180,7 +191,7 @@
         return s;
       }
       function createProgram(gl, vs, fs) {
-        /* ... kode sama ... */
+        /* ... (kode sama persis seperti sebelumnya) ... */
         const p = gl.createProgram();
         gl.attachShader(p, vs);
         gl.attachShader(p, fs);
@@ -197,7 +208,7 @@
         return p;
       }
 
-      // --- **** UV MAPPING 2x UNTUK SEMUA SISI **** ---
+      // --- **** GEOMETRI & UV MAPPING (1x Pendek, 2x Panjang) **** ---
       function setupGeometryAndBuffers() {
         if (
           positionAttributeLocation === undefined ||
@@ -210,11 +221,10 @@
         }
 
         // Posisi Vertex Balok (Panjang 2x di Z) - Tetap Sama
-        const W = 0.5;
-        const H = 0.5;
-        const D = 1.0;
+        const W = 0.5; // Lebar setengah
+        const H = 0.5; // Tinggi setengah
+        const D = 1.0; // Kedalaman setengah (dimensi panjang)
         const positions = new Float32Array([
-          /* ... data posisi sama persis ... */
           // Depan (Z+) (0-3) CCW from bottom-left
           -W,
           -H,
@@ -295,10 +305,37 @@
           -D,
         ]);
 
-        // --- Koordinat Tekstur (UV) - SEMUA SISI 2x REPEAT ---
-        const texCoordsAll2x = new Float32Array([
-          // Depan (0-3): Vertices (-W,-H,D), (W,-H,D), (W,H,D), (-W,H,D)
-          // Target 2x B. UV Map: U=X(0..2), V=Y(0..1). B tegak.
+        // --- Koordinat Tekstur (UV) - Disesuaikan ---
+        // Tujuan: 'Atas' huruf B selalu ke arah +Y global jika memungkinkan.
+        //         1x repeat di sisi pendek (Depan Z+, Belakang Z-).
+        //         2x repeat di sisi panjang (Atas Y+, Bawah Y-, Kanan X+, Kiri X-).
+        const finalTexCoords = new Float32Array([
+          // Depan (0-3): Sisi Pendek (W x H). 1x Repeat. U=X(0..1), V=Y(0..1). B tegak.
+          // Vertices: (-W,-H,D), (W,-H,D), (W,H,D), (-W,H,D)
+          0.0,
+          0.0,
+          1.0,
+          0.0,
+          1.0,
+          1.0,
+          0.0,
+          1.0,
+
+          // Belakang (4-7): Sisi Pendek (W x H). 1x Repeat. U=X(1..0), V=Y(0..1). B tegak, tidak mirror.
+          // Vertices: (W,-H,-D), (-W,-H,-D), (-W,H,-D), (W,H,-D)
+          1.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          1.0,
+          1.0,
+          1.0,
+
+          // Atas (8-11): Sisi Panjang (W x D). 2x Repeat along Z. U=Z(0..2), V=X(0..1). B 'tidur', atas ke +X.
+          // Vertices: (-W,H,-D), (-W,H,D), (W,H,D), (W,H,-D)
+          // Vtx Z: -D, D, D, -D => U: 0, 2, 2, 0
+          // Vtx X: -W,-W, W, W  => V: 0, 0, 1, 1
           0.0,
           0.0,
           2.0,
@@ -308,52 +345,38 @@
           0.0,
           1.0,
 
-          // Belakang (4-7): Vertices (W,-H,-D), (-W,-H,-D), (-W,H,-D), (W,H,-D)
-          // Target 2x B. UV Map: U=X(2..0), V=Y(0..1). B tegak, tidak mirror.
+          // Bawah (12-15): Sisi Panjang (W x D). 2x Repeat along Z. U=Z(0..2), V=X(1..0). B 'tidur', atas ke +X, tidak terbalik dari Atas.
+          // Vertices: (-W,-H,D), (W,-H,D), (W,-H,-D), (-W,-H,-D)
+          // Vtx Z:  D, D,-D,-D => U: 2, 2, 0, 0
+          // Vtx X: -W, W, W,-W  => V: 0, 1, 1, 0
+          // Mapping U=Z(0..2), V=X(1..0):
           2.0,
           0.0,
-          0.0,
-          0.0,
-          0.0,
-          1.0,
           2.0,
           1.0,
+          0.0,
+          1.0,
+          0.0,
+          0.0, // Coba UV: (2,0), (2,1), (0,1), (0,0)
 
-          // Atas (8-11): Vertices (-W,H,-D), (-W,H,D), (W,H,D), (W,H,-D)
-          // Target 2x B. UV Map: U=Z(0..2), V=X(0..1). B tidur (atas ke +X).
+          // Kanan (X+) (16-19): Sisi Panjang (H x D). 2x Repeat along Z. U=Z(0..2), V=Y(0..1). B tegak.
+          // Vertices: (W,-H,-D), (W,H,-D), (W,H,D), (W,-H,D)
+          // Vtx Z: -D,-D, D, D => U: 0, 0, 2, 2
+          // Vtx Y: -H, H, H,-H => V: 0, 1, 1, 0
           0.0,
           0.0,
-          2.0,
           0.0,
+          1.0,
           2.0,
           1.0,
+          2.0,
           0.0,
-          1.0, // Vtx Z: -D,D,D,-D | Vtx X: -W,-W,W,W -> UV (U=Z, V=X): (0,0), (2,0), (2,1), (0,1)
 
-          // Bawah (12-15): Vertices (-W,-H,D), (W,-H,D), (W,-H,-D), (-W,-H,-D)
-          // Target 2x B. UV Map: U=Z(0..2), V=X(1..0). B tidur (atas ke +X), tidak terbalik.
-          0.0,
-          1.0,
-          2.0,
-          1.0,
-          2.0,
-          0.0,
-          0.0,
-          0.0, // Vtx Z: D,D,-D,-D | Vtx X: -W,W,W,-W -> UV (U=Z, V=X): (0,1), (2,1), (2,0), (0,0)
-
-          // Kanan (X+) (16-19): Vertices (W,-H,-D), (W,H,-D), (W,H,D), (W,-H,D)
-          // Target 2x B. UV Map: U=Z(0..2), V=Y(0..1). B tegak.
-          0.0,
-          0.0,
-          0.0,
-          1.0,
-          2.0,
-          1.0,
-          2.0,
-          0.0, // Vtx Z: -D,-D,D,D | Vtx Y: -H,H,H,-H -> UV (U=Z, V=Y): (0,0), (0,1), (2,1), (2,0)
-
-          // Kiri (X-) (20-23): Vertices (-W,-H,D), (-W,H,D), (-W,H,-D), (-W,-H,-D)
-          // Target 2x B. UV Map: U=Z(2..0), V=Y(0..1). B tegak, tidak mirror.
+          // Kiri (X-) (20-23): Sisi Panjang (H x D). 2x Repeat along Z. U=Z(2..0), V=Y(0..1). B tegak, tidak mirror.
+          // Vertices: (-W,-H,D), (-W,H,D), (-W,H,-D), (-W,-H,-D)
+          // Vtx Z:  D, D,-D,-D => U: 2, 2, 0, 0
+          // Vtx Y: -H, H, H,-H => V: 0, 1, 1, 0
+          // Mapping U=Z(2..0), V=Y(0..1):
           2.0,
           0.0,
           2.0,
@@ -361,12 +384,12 @@
           0.0,
           1.0,
           0.0,
-          0.0, // Vtx Z: D,D,-D,-D | Vtx Y: -H,H,H,-H -> UV (U=Z, V=Y): (2,0), (2,1), (0,1), (0,0)
+          0.0,
         ]);
 
-        // Indeks (Tetap sama)
+        // Indeks (Tetap sama, pastikan sesuai urutan vertex)
         const indices = new Uint16Array([
-          /* ... data indeks sama persis ... */ 0,
+          0,
           1,
           2,
           0,
@@ -422,8 +445,8 @@
         );
         texCoordBuffer = gl.createBuffer();
         gl.bindBuffer(gl.ARRAY_BUFFER, texCoordBuffer);
-        // Gunakan texCoordsAll2x yang baru
-        gl.bufferData(gl.ARRAY_BUFFER, texCoordsAll2x, gl.STATIC_DRAW);
+        // Gunakan finalTexCoords yang sudah diperbaiki
+        gl.bufferData(gl.ARRAY_BUFFER, finalTexCoords, gl.STATIC_DRAW); // Updated variable name
         gl.enableVertexAttribArray(texCoordAttributeLocation);
         gl.vertexAttribPointer(
           texCoordAttributeLocation,
@@ -439,12 +462,12 @@
         gl.bindVertexArray(null);
         gl.bindBuffer(gl.ARRAY_BUFFER, null);
         gl.bindBuffer(gl.ELEMENT_ARRAY_BUFFER, null);
-        console.log("Geometri Balok (UV 2x Semua Sisi) dan buffer OK.");
+        console.log("Geometri Balok (UV 1x/2x) dan buffer OK.");
       }
 
       // --- Fungsi Tekstur (Pastikan REPEAT aktif) ---
       function createPlaceholderTexture() {
-        /* ... kode sama, pastikan REPEAT ... */
+        /* ... (kode sama persis, pastikan REPEAT) ... */
         const t = gl.createTexture();
         gl.bindTexture(gl.TEXTURE_2D, t);
         const p = new Uint8Array([128, 0, 128, 255]);
@@ -460,14 +483,14 @@
           p
         );
         gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.REPEAT);
-        gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.REPEAT);
+        gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.REPEAT); // REPEAT
         gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.NEAREST);
         gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.NEAREST);
         gl.bindTexture(gl.TEXTURE_2D, null);
         return t;
       }
       function loadTexture(url) {
-        /* ... kode sama, pastikan REPEAT ... */
+        /* ... (kode sama persis, pastikan REPEAT di onload) ... */
         const tex = gl.createTexture();
         gl.bindTexture(gl.TEXTURE_2D, tex);
         const pixel = new Uint8Array([128, 0, 128, 255]);
@@ -501,7 +524,11 @@
               image
             );
             gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.REPEAT);
-            gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.REPEAT);
+            /*PENTING*/ gl.texParameteri(
+              gl.TEXTURE_2D,
+              gl.TEXTURE_WRAP_T,
+              gl.REPEAT
+            ); /*PENTING*/
             if (isPowerOf2(image.width) && isPowerOf2(image.height)) {
               console.log("Texture PoT, mipmaps generated.");
               gl.generateMipmap(gl.TEXTURE_2D);
@@ -558,7 +585,7 @@
         const zf = 100.0;
         glMatrix.mat4.perspective(projectionMatrix, fov, aspect, zn, zf);
         const camPos = [0, 1.5, 4];
-        const lookAt = [0, 0, 0];
+        /* Naik sedikit & Mundur */ const lookAt = [0, 0, 0];
         const up = [0, 1, 0];
         glMatrix.mat4.lookAt(viewMatrix, camPos, lookAt, up);
         glMatrix.mat4.identity(modelMatrix);
@@ -589,7 +616,7 @@
         return false;
       }
 
-      // --- Fungsi Render (Sama, rotasi Y saja untuk inspeksi) ---
+      // --- Fungsi Render (Sama) ---
       function render(time) {
         /* ... kode sama ... */
         requestAnimationFrame(render);
@@ -601,13 +628,14 @@
         lastTime = time;
         handleResize();
         rotationAngle += dt * 0.3;
-        glMatrix.mat4.identity(modelMatrix);
+        /* Perlambat lagi */ glMatrix.mat4.identity(modelMatrix);
         glMatrix.mat4.rotate(
           modelMatrix,
           modelMatrix,
           rotationAngle,
           [0, 1, 0]
-        ); // Rotasi Y saja
+        ); /* Rotasi Y saja agar mudah dilihat */
+        // glMatrix.mat4.rotate(modelMatrix,modelMatrix,rotationAngle*0.5,[1,0,1]);
         gl.clear(gl.COLOR_BUFFER_BIT | gl.DEPTH_BUFFER_BIT);
         gl.useProgram(shaderProgram);
         gl.bindVertexArray(vao);
