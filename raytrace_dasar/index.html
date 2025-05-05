@@ -3,7 +3,7 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>WebGL 2 - Ray Tracing 2 Overlapping Spheres</title>
+    <title>CPU Ray Tracing - 2 Spheres (Canvas 2D)</title>
     <style>
       body {
         margin: 0;
@@ -21,291 +21,132 @@
     </style>
   </head>
   <body>
-    <canvas id="webgl-canvas" width="500" height="500"></canvas>
+    <canvas id="cpu-canvas" width="500" height="500"></canvas>
 
+    <!-- gl-matrix masih berguna untuk operasi vektor -->
     <script src="https://cdn.jsdelivr.net/npm/gl-matrix@3.4.3/gl-matrix-min.js"></script>
-
-    <!-- Vertex Shader (Tetap sama) -->
-    <script id="vertex-shader" type="x-shader/x-vertex">
-      #version 300 es
-          in vec2 a_position;
-          out vec2 v_screenCoord;
-
-          void main() {
-              gl_Position = vec4(a_position, 0.0, 1.0);
-              v_screenCoord = a_position * 0.5 + 0.5;
-          }
-    </script>
-
-    <!-- Fragment Shader (Tetap sama seperti versi multiple) -->
-    <script id="fragment-shader" type="x-shader/x-fragment">
-      #version 300 es
-          precision highp float;
-
-          struct Sphere {
-              vec3 center;
-              float radius;
-              vec4 color;
-          };
-
-          #define MAX_SPHERES 10
-
-          in vec2 v_screenCoord;
-
-          uniform vec2 u_resolution;
-          uniform vec3 u_cameraPos;
-          uniform int u_numSpheres;
-          uniform Sphere u_spheres[MAX_SPHERES];
-
-          out vec4 outColor;
-
-          float intersectSphere(vec3 rayOrigin, vec3 rayDir, vec3 sphereCenter, float sphereRadius) {
-              vec3 oc = rayOrigin - sphereCenter;
-              float a = dot(rayDir, rayDir);
-              float b = 2.0 * dot(oc, rayDir);
-              float c = dot(oc, oc) - sphereRadius * sphereRadius;
-              float discriminant = b*b - 4.0*a*c;
-
-              if (discriminant < 0.0) {
-                  return -1.0;
-              } else {
-                  float sqrtDiscriminant = sqrt(discriminant);
-                  float t0 = (-b - sqrtDiscriminant) / (2.0 * a);
-                  float t1 = (-b + sqrtDiscriminant) / (2.0 * a);
-                  if (t0 > 0.001) return t0;
-                  else if (t1 > 0.001) return t1;
-                  else return -1.0;
-              }
-          }
-
-          void main() {
-              vec2 ndc = v_screenCoord * 2.0 - 1.0;
-              vec3 rayDir = normalize(vec3(ndc.x * (u_resolution.x / u_resolution.y), ndc.y, -1.0));
-              vec3 rayOrigin = u_cameraPos;
-
-              float closest_t = 1e10;
-              vec4 hitColor = vec4(0.2, 0.4, 0.8, 1.0); // Warna latar
-              bool hit = false;
-
-              for (int i = 0; i < u_numSpheres; ++i) {
-                   if (i >= MAX_SPHERES) break;
-                   Sphere currentSphere = u_spheres[i];
-                   float t = intersectSphere(rayOrigin, rayDir, currentSphere.center, currentSphere.radius);
-
-                   if (t > 0.0 && t < closest_t) {
-                       closest_t = t;
-                       hitColor = currentSphere.color;
-                       hit = true;
-                   }
-              }
-              outColor = hitColor;
-          }
-    </script>
 
     <script>
       "use strict";
 
-      // === PERUBAHAN UTAMA DI SINI ===
-      // --- Definisi Data Bola di JavaScript ---
-      // Hanya 2 bola, diatur agar tumpang tindih
+      // --- Data Scene (Sama seperti sebelumnya) ---
       const spheres = [
-        // Bola 1: Merah, lebih depan, sedikit ke kiri
         {
           center: glMatrix.vec3.fromValues(-0.5, 0.0, -3.0),
           radius: 0.8,
           color: [1.0, 0.2, 0.2, 1.0],
-        },
-        // Bola 2: Biru, sedikit lebih belakang, sedikit ke kanan dan atas, sebagian tertutup Bola 1
+        }, // Merah
         {
           center: glMatrix.vec3.fromValues(0.3, 0.4, -3.5),
           radius: 0.7,
           color: [0.3, 0.5, 1.0, 1.0],
-        },
+        }, // Biru
       ];
-      const MAX_SPHERES_IN_SHADER = 10; // Shader masih bisa handle sampai 10, tapi kita hanya kirim 2
-      // ===============================
+      const cameraPos = glMatrix.vec3.fromValues(0.0, 0.0, 0.0);
+      const backgroundColor = [0.2, 0.4, 0.8, 1.0]; // Biru latar
 
-      function main() {
-        const canvas = document.getElementById("webgl-canvas");
-        const gl = canvas.getContext("webgl2");
-        if (!gl) {
-          console.error("WebGL 2 tidak tersedia.");
-          alert(
-            "WebGL 2 tidak tersedia. Demo ini memerlukan browser yang mendukung WebGL 2."
-          );
+      // --- Fungsi Ray Tracing di CPU ---
+
+      // Fungsi perpotongan sinar-bola (versi JS)
+      // Mengembalikan jarak t > 0 jika kena, -1 jika tidak
+      function intersectSphereJS(
+        rayOrigin,
+        rayDir,
+        sphereCenter,
+        sphereRadius
+      ) {
+        const oc = glMatrix.vec3.create();
+        glMatrix.vec3.subtract(oc, rayOrigin, sphereCenter); // oc = rayOrigin - sphereCenter
+
+        // Tidak perlu 'a' karena rayDir sudah dinormalisasi (dot(rayDir, rayDir) = 1)
+        // float a = dot(rayDir, rayDir);
+        const b = 2.0 * glMatrix.vec3.dot(oc, rayDir);
+        const c = glMatrix.vec3.dot(oc, oc) - sphereRadius * sphereRadius;
+        const discriminant = b * b - 4.0 * c; // a = 1
+
+        if (discriminant < 0.0) {
+          return -1.0;
+        } else {
+          const sqrtDiscriminant = Math.sqrt(discriminant);
+          const t0 = (-b - sqrtDiscriminant) / 2.0; // a = 1
+          const t1 = (-b + sqrtDiscriminant) / 2.0; // a = 1
+
+          // Pilih t positif terkecil
+          if (t0 > 0.001) return t0;
+          else if (t1 > 0.001) return t1;
+          else return -1.0;
+        }
+      }
+
+      // Fungsi utama untuk merender scene
+      function renderSceneCPU() {
+        const canvas = document.getElementById("cpu-canvas");
+        const ctx = canvas.getContext("2d");
+        if (!ctx) {
+          console.error("Canvas 2D tidak tersedia.");
+          alert("Tidak bisa mendapatkan konteks Canvas 2D.");
           return;
         }
-        console.log("Konteks WebGL 2 OK.");
 
-        const vsSource = document.getElementById("vertex-shader").text.trim();
-        const fsSource = document.getElementById("fragment-shader").text.trim();
-        const shaderProgram = initShaderProgram(gl, vsSource, fsSource);
-        if (!shaderProgram) return;
+        const width = canvas.width;
+        const height = canvas.height;
+        const aspectRatio = width / height;
 
-        // Dapatkan Lokasi Uniform (Sama seperti sebelumnya)
-        const programInfo = {
-          program: shaderProgram,
-          attribLocations: {
-            vertexPosition: gl.getAttribLocation(shaderProgram, "a_position"),
-          },
-          uniformLocations: {
-            resolution: gl.getUniformLocation(shaderProgram, "u_resolution"),
-            cameraPos: gl.getUniformLocation(shaderProgram, "u_cameraPos"),
-            numSpheres: gl.getUniformLocation(shaderProgram, "u_numSpheres"),
-            sphereCenters: [],
-            sphereRadii: [],
-            sphereColors: [],
-          },
-        };
-        for (let i = 0; i < MAX_SPHERES_IN_SHADER; ++i) {
-          programInfo.uniformLocations.sphereCenters.push(
-            gl.getUniformLocation(shaderProgram, `u_spheres[${i}].center`)
-          );
-          programInfo.uniformLocations.sphereRadii.push(
-            gl.getUniformLocation(shaderProgram, `u_spheres[${i}].radius`)
-          );
-          programInfo.uniformLocations.sphereColors.push(
-            gl.getUniformLocation(shaderProgram, `u_spheres[${i}].color`)
-          );
-        }
-        // Cek Lokasi Uniform (Opsional, sama seperti sebelumnya)
-        // ... (kode cek lokasi bisa ditambahkan kembali jika perlu)
+        // Dapatkan ImageData untuk memanipulasi piksel
+        const imageData = ctx.createImageData(width, height);
+        const data = imageData.data; // Array RGBA (Uint8ClampedArray)
 
-        const positionBuffer = initPositionBuffer(gl);
+        console.time("CPU Ray Trace Render"); // Ukur waktu render
 
-        function render() {
-          gl.viewport(0, 0, gl.canvas.width, gl.canvas.height);
-          gl.clearColor(0.0, 0.0, 0.0, 1.0);
-          gl.clear(gl.COLOR_BUFFER_BIT);
+        const rayDir = glMatrix.vec3.create(); // Vektor untuk arah sinar (reuse)
 
-          gl.useProgram(programInfo.program);
+        // Loop melalui setiap piksel
+        for (let y = 0; y < height; ++y) {
+          for (let x = 0; x < width; ++x) {
+            // 1. Hitung Arah Sinar (Ray) untuk piksel (x, y)
+            // Konversi koordinat piksel (0 to width/height) ke NDC (-1 to 1)
+            const ndcX = ((x + 0.5) / width) * 2.0 - 1.0; // +0.5 untuk pusat piksel
+            const ndcY = (1.0 - (y + 0.5) / height) * 2.0 - 1.0; // Y dibalik di canvas 2D
 
-          // Setup atribut quad (Sama seperti sebelumnya)
-          {
-            gl.bindBuffer(gl.ARRAY_BUFFER, positionBuffer);
-            gl.vertexAttribPointer(
-              programInfo.attribLocations.vertexPosition,
-              2,
-              gl.FLOAT,
-              false,
-              0,
-              0
-            );
-            gl.enableVertexAttribArray(
-              programInfo.attribLocations.vertexPosition
-            );
+            // Hitung arah sinar dari kamera melalui titik di view plane (z=-1)
+            glMatrix.vec3.set(rayDir, ndcX * aspectRatio, ndcY, -1.0);
+            glMatrix.vec3.normalize(rayDir, rayDir);
+
+            // 2. Cari Perpotongan Terdekat
+            let closest_t = Infinity; // Jarak terdekat
+            let hitColor = backgroundColor; // Warna default = latar belakang
+
+            for (const sphere of spheres) {
+              const t = intersectSphereJS(
+                cameraPos,
+                rayDir,
+                sphere.center,
+                sphere.radius
+              );
+              if (t > 0.0 && t < closest_t) {
+                closest_t = t;
+                hitColor = sphere.color;
+              }
+            }
+
+            // 3. Set Warna Piksel di ImageData
+            const pixelIndex = (y * width + x) * 4; // Indeks awal untuk RGBA piksel ini
+            data[pixelIndex] = Math.floor(hitColor[0] * 255); // R (0-255)
+            data[pixelIndex + 1] = Math.floor(hitColor[1] * 255); // G (0-255)
+            data[pixelIndex + 2] = Math.floor(hitColor[2] * 255); // B (0-255)
+            data[pixelIndex + 3] = Math.floor(hitColor[3] * 255); // A (0-255)
           }
-
-          // Set Uniform Dasar (Sama seperti sebelumnya)
-          gl.uniform2f(
-            programInfo.uniformLocations.resolution,
-            gl.canvas.width,
-            gl.canvas.height
-          );
-          gl.uniform3f(programInfo.uniformLocations.cameraPos, 0.0, 0.0, 0.0);
-
-          // --- Set Uniform untuk Bola ---
-          // Sekarang spheres.length akan bernilai 2
-          const numSpheresToSend = Math.min(
-            spheres.length,
-            MAX_SPHERES_IN_SHADER
-          );
-          gl.uniform1i(
-            programInfo.uniformLocations.numSpheres,
-            numSpheresToSend
-          );
-
-          // Loop ini hanya akan berjalan 2 kali
-          for (let i = 0; i < numSpheresToSend; ++i) {
-            if (programInfo.uniformLocations.sphereCenters[i] !== null) {
-              gl.uniform3fv(
-                programInfo.uniformLocations.sphereCenters[i],
-                spheres[i].center
-              );
-            }
-            if (programInfo.uniformLocations.sphereRadii[i] !== null) {
-              gl.uniform1f(
-                programInfo.uniformLocations.sphereRadii[i],
-                spheres[i].radius
-              );
-            }
-            if (programInfo.uniformLocations.sphereColors[i] !== null) {
-              gl.uniform4fv(
-                programInfo.uniformLocations.sphereColors[i],
-                spheres[i].color
-              );
-            }
-          }
-
-          // Gambar quad (Sama seperti sebelumnya)
-          gl.drawArrays(gl.TRIANGLE_STRIP, 0, 4);
         }
 
-        render(); // Render sekali
+        console.timeEnd("CPU Ray Trace Render"); // Selesai ukur waktu
+
+        // 4. Tampilkan hasil ke Canvas
+        ctx.putImageData(imageData, 0, 0);
+        console.log("CPU Ray Tracing Selesai.");
       }
 
-      // --- Fungsi Helper (Tidak berubah) ---
-      function initPositionBuffer(gl) {
-        /* ... sama seperti sebelumnya ... */
-        const positionBuffer = gl.createBuffer();
-        gl.bindBuffer(gl.ARRAY_BUFFER, positionBuffer);
-        const positions = [-1.0, 1.0, -1.0, -1.0, 1.0, 1.0, 1.0, -1.0];
-        gl.bufferData(
-          gl.ARRAY_BUFFER,
-          new Float32Array(positions),
-          gl.STATIC_DRAW
-        );
-        return positionBuffer;
-      }
-      function initShaderProgram(gl, vsSource, fsSource) {
-        /* ... sama seperti sebelumnya ... */
-        const vertexShader = loadShader(gl, gl.VERTEX_SHADER, vsSource);
-        const fragmentShader = loadShader(gl, gl.FRAGMENT_SHADER, fsSource);
-        if (!vertexShader || !fragmentShader) return null;
-        const shaderProgram = gl.createProgram();
-        gl.attachShader(shaderProgram, vertexShader);
-        gl.attachShader(shaderProgram, fragmentShader);
-        gl.linkProgram(shaderProgram);
-        if (!gl.getProgramParameter(shaderProgram, gl.LINK_STATUS)) {
-          console.error(
-            "Gagal me-link program shader: " +
-              gl.getProgramInfoLog(shaderProgram)
-          );
-          console.log("--- Vertex Shader Source ---\n" + vsSource);
-          console.log("--- Fragment Shader Source ---\n" + fsSource);
-          gl.deleteProgram(shaderProgram);
-          gl.deleteShader(vertexShader);
-          gl.deleteShader(fragmentShader);
-          return null;
-        }
-        return shaderProgram;
-      }
-      function loadShader(gl, type, source) {
-        /* ... sama seperti sebelumnya ... */
-        const shader = gl.createShader(type);
-        gl.shaderSource(shader, source);
-        gl.compileShader(shader);
-        if (!gl.getShaderParameter(shader, gl.COMPILE_STATUS)) {
-          const shaderType = type === gl.VERTEX_SHADER ? "vertex" : "fragment";
-          console.error(
-            `Gagal mengkompilasi shader (${shaderType}):\n${gl.getShaderInfoLog(
-              shader
-            )}`
-          );
-          console.log(
-            `--- Source Shader (${shaderType}) ---\n` +
-              source
-                .split("\n")
-                .map((line, i) => `${i + 1}: ${line}`)
-                .join("\n")
-          );
-          gl.deleteShader(shader);
-          return null;
-        }
-        return shader;
-      }
-
-      window.onload = main;
+      // Jalankan rendering saat halaman dimuat
+      window.onload = renderSceneCPU;
     </script>
   </body>
 </html>
