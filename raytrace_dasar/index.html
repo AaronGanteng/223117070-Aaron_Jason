@@ -3,7 +3,7 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>CPU Ray Tracing - 2 Spheres (Canvas 2D)</title>
+    <title>CPU Ray Tracing - Phong Lighting</title>
     <style>
       body {
         margin: 0;
@@ -12,8 +12,8 @@
         justify-content: center;
         align-items: center;
         min-height: 100vh;
-        background-color: #f0f0f0;
-      }
+        background-color: #333;
+      } /* Latar sedikit gelap */
       canvas {
         border: 1px solid black;
         display: block;
@@ -23,55 +23,75 @@
   <body>
     <canvas id="cpu-canvas" width="500" height="500"></canvas>
 
-    <!-- gl-matrix masih berguna untuk operasi vektor -->
     <script src="https://cdn.jsdelivr.net/npm/gl-matrix@3.4.3/gl-matrix-min.js"></script>
 
     <script>
       "use strict";
 
-      // --- Data Scene (Sama seperti sebelumnya) ---
+      // --- Konfigurasi Scene & Pencahayaan ---
+      const cameraPos = glMatrix.vec3.fromValues(0.0, 0.5, 0.0); // Kamera sedikit ke atas
+      const backgroundColor = [0.1, 0.1, 0.15, 1.0]; // Warna latar gelap
+
+      // Sumber Cahaya (Titik)
+      const lightPos = glMatrix.vec3.fromValues(3.0, 5.0, -1.0);
+      const lightColor = glMatrix.vec3.fromValues(1.0, 1.0, 1.0); // Cahaya putih
+
+      // Pencahayaan Ambient Global
+      const globalAmbient = glMatrix.vec3.fromValues(0.2, 0.2, 0.25); // Sedikit ambient kebiruan
+
+      // --- Material & Objek Bola ---
       const spheres = [
         {
           center: glMatrix.vec3.fromValues(-0.5, 0.0, -3.0),
           radius: 0.8,
-          color: [1.0, 0.2, 0.2, 1.0],
-        }, // Merah
+          material: {
+            color: glMatrix.vec3.fromValues(1.0, 0.3, 0.3), // Merah
+            specularIntensity: 0.8, // Cukup mengkilap
+            shininess: 32.0, // Highlight specular sedang
+          },
+        },
         {
           center: glMatrix.vec3.fromValues(0.3, 0.4, -3.5),
           radius: 0.7,
-          color: [0.3, 0.5, 1.0, 1.0],
-        }, // Biru
+          material: {
+            color: glMatrix.vec3.fromValues(0.3, 0.5, 1.0), // Biru
+            specularIntensity: 0.5, // Kurang mengkilap
+            shininess: 16.0, // Highlight specular lebih lebar
+          },
+        },
+        // Tambahkan bola "lantai" besar untuk efek bayangan/refleksi (opsional)
+        {
+          center: glMatrix.vec3.fromValues(0.0, -100.5, -3.0), // Jauh di bawah
+          radius: 100.0,
+          material: {
+            color: glMatrix.vec3.fromValues(0.7, 0.7, 0.7), // Abu-abu
+            specularIntensity: 0.1, // Hampir tidak mengkilap
+            shininess: 8.0,
+          },
+        },
       ];
-      const cameraPos = glMatrix.vec3.fromValues(0.0, 0.0, 0.0);
-      const backgroundColor = [0.2, 0.4, 0.8, 1.0]; // Biru latar
 
       // --- Fungsi Ray Tracing di CPU ---
 
-      // Fungsi perpotongan sinar-bola (versi JS)
-      // Mengembalikan jarak t > 0 jika kena, -1 jika tidak
+      // Fungsi intersectSphereJS (Sama seperti sebelumnya)
       function intersectSphereJS(
         rayOrigin,
         rayDir,
         sphereCenter,
         sphereRadius
       ) {
+        // ... (Kode fungsi ini tetap sama)
         const oc = glMatrix.vec3.create();
-        glMatrix.vec3.subtract(oc, rayOrigin, sphereCenter); // oc = rayOrigin - sphereCenter
-
-        // Tidak perlu 'a' karena rayDir sudah dinormalisasi (dot(rayDir, rayDir) = 1)
-        // float a = dot(rayDir, rayDir);
+        glMatrix.vec3.subtract(oc, rayOrigin, sphereCenter);
         const b = 2.0 * glMatrix.vec3.dot(oc, rayDir);
         const c = glMatrix.vec3.dot(oc, oc) - sphereRadius * sphereRadius;
-        const discriminant = b * b - 4.0 * c; // a = 1
-
+        const discriminant = b * b - 4.0 * c;
         if (discriminant < 0.0) {
           return -1.0;
         } else {
           const sqrtDiscriminant = Math.sqrt(discriminant);
-          const t0 = (-b - sqrtDiscriminant) / 2.0; // a = 1
-          const t1 = (-b + sqrtDiscriminant) / 2.0; // a = 1
-
-          // Pilih t positif terkecil
+          const t0 = (-b - sqrtDiscriminant) / 2.0;
+          const t1 = (-b + sqrtDiscriminant) / 2.0;
           if (t0 > 0.001) return t0;
           else if (t1 > 0.001) return t1;
           else return -1.0;
@@ -91,30 +111,38 @@
         const width = canvas.width;
         const height = canvas.height;
         const aspectRatio = width / height;
-
-        // Dapatkan ImageData untuk memanipulasi piksel
         const imageData = ctx.createImageData(width, height);
-        const data = imageData.data; // Array RGBA (Uint8ClampedArray)
+        const data = imageData.data;
 
-        console.time("CPU Ray Trace Render"); // Ukur waktu render
+        console.time("CPU Ray Trace Render Phong");
 
-        const rayDir = glMatrix.vec3.create(); // Vektor untuk arah sinar (reuse)
+        // Vektor bantu (dideklarasikan di luar loop untuk efisiensi)
+        const rayDir = glMatrix.vec3.create();
+        const hitPoint = glMatrix.vec3.create();
+        const normal = glMatrix.vec3.create();
+        const lightDir = glMatrix.vec3.create();
+        const viewDir = glMatrix.vec3.create();
+        const reflectDir = glMatrix.vec3.create();
+        const halfVec = glMatrix.vec3.create(); // (Alternatif untuk specular Blinn-Phong, tidak dipakai di sini)
+        const tempVec = glMatrix.vec3.create();
+        const ambientTerm = glMatrix.vec3.create();
+        const diffuseTerm = glMatrix.vec3.create();
+        const specularTerm = glMatrix.vec3.create();
+        const finalColorVec = glMatrix.vec3.create();
 
         // Loop melalui setiap piksel
         for (let y = 0; y < height; ++y) {
           for (let x = 0; x < width; ++x) {
-            // 1. Hitung Arah Sinar (Ray) untuk piksel (x, y)
-            // Konversi koordinat piksel (0 to width/height) ke NDC (-1 to 1)
-            const ndcX = ((x + 0.5) / width) * 2.0 - 1.0; // +0.5 untuk pusat piksel
-            const ndcY = (1.0 - (y + 0.5) / height) * 2.0 - 1.0; // Y dibalik di canvas 2D
-
-            // Hitung arah sinar dari kamera melalui titik di view plane (z=-1)
+            // 1. Hitung Arah Sinar (Ray)
+            const ndcX = ((x + 0.5) / width) * 2.0 - 1.0;
+            const ndcY = (1.0 - (y + 0.5) / height) * 2.0 - 1.0;
             glMatrix.vec3.set(rayDir, ndcX * aspectRatio, ndcY, -1.0);
+            glMatrix.vec3.subtract(rayDir, rayDir, cameraPos); // Arah dari kamera ke titik di view plane
             glMatrix.vec3.normalize(rayDir, rayDir);
 
             // 2. Cari Perpotongan Terdekat
-            let closest_t = Infinity; // Jarak terdekat
-            let hitColor = backgroundColor; // Warna default = latar belakang
+            let closest_t = Infinity;
+            let hitSphere = null; // Simpan referensi ke bola yang terkena
 
             for (const sphere of spheres) {
               const t = intersectSphereJS(
@@ -125,24 +153,90 @@
               );
               if (t > 0.0 && t < closest_t) {
                 closest_t = t;
-                hitColor = sphere.color;
+                hitSphere = sphere;
               }
             }
 
-            // 3. Set Warna Piksel di ImageData
-            const pixelIndex = (y * width + x) * 4; // Indeks awal untuk RGBA piksel ini
-            data[pixelIndex] = Math.floor(hitColor[0] * 255); // R (0-255)
-            data[pixelIndex + 1] = Math.floor(hitColor[1] * 255); // G (0-255)
-            data[pixelIndex + 2] = Math.floor(hitColor[2] * 255); // B (0-255)
-            data[pixelIndex + 3] = Math.floor(hitColor[3] * 255); // A (0-255)
+            // 3. Hitung Warna (Latar Belakang atau Phong)
+            let finalR = backgroundColor[0];
+            let finalG = backgroundColor[1];
+            let finalB = backgroundColor[2];
+
+            if (hitSphere) {
+              // Jika sinar mengenai sebuah bola
+              const mat = hitSphere.material; // Material bola yang kena
+
+              // Hitung titik perpotongan
+              glMatrix.vec3.scale(hitPoint, rayDir, closest_t);
+              glMatrix.vec3.add(hitPoint, cameraPos, hitPoint);
+
+              // Hitung Normal pada titik perpotongan
+              glMatrix.vec3.subtract(normal, hitPoint, hitSphere.center);
+              glMatrix.vec3.normalize(normal, normal);
+
+              // Hitung Vektor Cahaya (dari titik ke cahaya)
+              glMatrix.vec3.subtract(lightDir, lightPos, hitPoint);
+              glMatrix.vec3.normalize(lightDir, lightDir);
+
+              // Hitung Vektor Pandang (dari titik ke kamera)
+              glMatrix.vec3.subtract(viewDir, cameraPos, hitPoint);
+              glMatrix.vec3.normalize(viewDir, viewDir);
+
+              // Hitung Vektor Refleksi (cahaya dipantulkan normal)
+              // reflectDir = reflect(-lightDir, normal)
+              // reflect(I, N) = I - 2 * dot(N, I) * N --> I = -lightDir
+              glMatrix.vec3.scale(tempVec, lightDir, -1); // tempVec = -lightDir
+              const dotNL = glMatrix.vec3.dot(normal, tempVec);
+              glMatrix.vec3.scale(reflectDir, normal, 2.0 * dotNL);
+              glMatrix.vec3.subtract(reflectDir, tempVec, reflectDir);
+              glMatrix.vec3.normalize(reflectDir, reflectDir); // Normalisasi hasil refleksi
+
+              // --- A. Hitung Komponen Ambient ---
+              glMatrix.vec3.multiply(ambientTerm, globalAmbient, mat.color);
+
+              // --- B. Hitung Komponen Diffuse ---
+              const diffuseFactor = Math.max(
+                0.0,
+                glMatrix.vec3.dot(normal, lightDir)
+              );
+              glMatrix.vec3.multiply(diffuseTerm, mat.color, lightColor); // objectColor * lightColor
+              glMatrix.vec3.scale(diffuseTerm, diffuseTerm, diffuseFactor); // * max(0, dot(N,L))
+
+              // --- C. Hitung Komponen Specular ---
+              const specularFactor = Math.pow(
+                Math.max(0.0, glMatrix.vec3.dot(reflectDir, viewDir)),
+                mat.shininess
+              );
+              glMatrix.vec3.scale(
+                specularTerm,
+                lightColor,
+                mat.specularIntensity * specularFactor
+              ); // lightColor * specIntensity * pow(max(0,dot(R,V)), shiny)
+
+              // --- D. Gabungkan Komponen ---
+              glMatrix.vec3.add(finalColorVec, ambientTerm, diffuseTerm);
+              glMatrix.vec3.add(finalColorVec, finalColorVec, specularTerm);
+
+              // --- E. Clamp Hasil ---
+              finalR = Math.min(1.0, Math.max(0.0, finalColorVec[0]));
+              finalG = Math.min(1.0, Math.max(0.0, finalColorVec[1]));
+              finalB = Math.min(1.0, Math.max(0.0, finalColorVec[2]));
+            }
+
+            // 4. Set Warna Piksel di ImageData
+            const pixelIndex = (y * width + x) * 4;
+            data[pixelIndex] = Math.floor(finalR * 255);
+            data[pixelIndex + 1] = Math.floor(finalG * 255);
+            data[pixelIndex + 2] = Math.floor(finalB * 255);
+            data[pixelIndex + 3] = 255; // Alpha = Opaque
           }
         }
 
-        console.timeEnd("CPU Ray Trace Render"); // Selesai ukur waktu
+        console.timeEnd("CPU Ray Trace Render Phong");
 
-        // 4. Tampilkan hasil ke Canvas
+        // 5. Tampilkan hasil ke Canvas
         ctx.putImageData(imageData, 0, 0);
-        console.log("CPU Ray Tracing Selesai.");
+        console.log("CPU Ray Tracing Phong Selesai.");
       }
 
       // Jalankan rendering saat halaman dimuat
