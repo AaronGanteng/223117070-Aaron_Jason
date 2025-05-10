@@ -1,0 +1,554 @@
+<!DOCTYPE html>
+<html lang="id">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>CPU Ray Tracing - IOR Interaktif</title>
+    <style>
+      body {
+        margin: 0;
+        padding: 0;
+        font-family: sans-serif;
+        display: flex;
+        flex-direction: column; /* Atur layout kolom */
+        align-items: center;
+        min-height: 100vh;
+        background-color: #222;
+        color: #eee;
+      }
+      canvas {
+        border: 1px solid black;
+        display: block;
+        margin-bottom: 15px; /* Beri jarak antara canvas dan kontrol */
+      }
+      .controls {
+        padding: 10px;
+        background-color: #333;
+        border-radius: 5px;
+        box-shadow: 0 2px 5px rgba(0, 0, 0, 0.2);
+      }
+      .controls label {
+        margin-right: 10px;
+      }
+      .controls input[type="range"] {
+        width: 200px;
+        vertical-align: middle;
+      }
+      .controls span {
+        display: inline-block;
+        min-width: 40px; /* Agar lebar span tidak berubah-ubah */
+        text-align: right;
+        font-weight: bold;
+        margin-left: 5px;
+      }
+    </style>
+  </head>
+  <body>
+    <div class="controls">
+      <label for="iorSlider">IOR Bola Kaca:</label>
+      <input
+        type="range"
+        id="iorSlider"
+        min="1.0"
+        max="2.5"
+        value="1.52"
+        step="0.01"
+      />
+      <span id="iorValue">1.52</span>
+    </div>
+
+    <canvas id="cpu-canvas" width="500" height="500"></canvas>
+
+    <script src="https://cdn.jsdelivr.net/npm/gl-matrix@3.4.3/gl-matrix-min.js"></script>
+
+    <script>
+      "use strict";
+
+      const IOR_AIR = 1.0;
+      const EPSILON = 0.001;
+
+      function customVec3Reflect(out, incidentVec, normalVec) {
+        /* ... Sama ... */
+        const dotProductTimesTwo =
+          2.0 * glMatrix.vec3.dot(incidentVec, normalVec);
+        glMatrix.vec3.subtract(
+          out,
+          incidentVec,
+          glMatrix.vec3.scale(
+            glMatrix.vec3.create(),
+            normalVec,
+            dotProductTimesTwo
+          )
+        );
+        return out;
+      }
+      function refract(outRefractedVec, incidentVec, normalVec, n1, n2) {
+        /* ... Sama ... */
+        const I = incidentVec;
+        let N = glMatrix.vec3.clone(normalVec);
+        let cos_i = glMatrix.vec3.dot(I, N);
+        let eta1 = n1;
+        let eta2 = n2;
+        if (cos_i > 0) {
+          glMatrix.vec3.scale(N, N, -1);
+          [eta1, eta2] = [eta2, eta1];
+        } else {
+          cos_i = -cos_i;
+        }
+        const eta_ratio = eta1 / eta2;
+        const k = 1.0 - eta_ratio * eta_ratio * (1.0 - cos_i * cos_i);
+        if (k < 0) {
+          return false;
+        }
+        const term1 = glMatrix.vec3.create();
+        glMatrix.vec3.scale(term1, I, eta_ratio);
+        const term2_scalar = eta_ratio * cos_i - Math.sqrt(k);
+        const term2_vec = glMatrix.vec3.create();
+        glMatrix.vec3.scale(term2_vec, N, term2_scalar);
+        glMatrix.vec3.add(outRefractedVec, term1, term2_vec);
+        return true;
+      }
+      function schlickFresnel(cosTheta, n1, n2) {
+        /* ... Sama ... */
+        let r0 = (n1 - n2) / (n1 + n2);
+        r0 = r0 * r0;
+        if (n1 > n2) {
+          const eta_ratio = n1 / n2;
+          const sinTheta_t_sq =
+            eta_ratio * eta_ratio * (1.0 - cosTheta * cosTheta);
+          if (sinTheta_t_sq > 1.0) return 1.0;
+        }
+        const oneMinusCos = 1.0 - Math.abs(cosTheta);
+        return r0 + (1.0 - r0) * Math.pow(oneMinusCos, 5);
+      }
+
+      const gridLineColor = glMatrix.vec3.fromValues(0.9, 0.9, 0.9);
+      const gridBgColor = glMatrix.vec3.fromValues(0.3, 0.35, 0.4);
+      const gridSpacing = 0.25;
+      const gridLineWidth = 0.02;
+      function getGridBackgroundColor(rayDirection, rayOrigin) {
+        /* ... Sama ... */
+        const targetZ = -10.0;
+        const t = (targetZ - rayOrigin[2]) / rayDirection[2];
+        if (t > 0) {
+          const hitX = rayOrigin[0] + rayDirection[0] * t;
+          const hitY = rayOrigin[1] + rayDirection[1] * t;
+          const modX = Math.abs(hitX % gridSpacing);
+          const modY = Math.abs(hitY % gridSpacing);
+          if (
+            modX < gridLineWidth / 2 ||
+            modX > gridSpacing - gridLineWidth / 2 ||
+            modY < gridLineWidth / 2 ||
+            modY > gridSpacing - gridLineWidth / 2
+          ) {
+            return gridLineColor;
+          }
+        }
+        return gridBgColor;
+      }
+
+      const cameraPos = glMatrix.vec3.fromValues(0.0, 0.2, 2.0);
+      const lights = [
+        {
+          position: glMatrix.vec3.fromValues(-2.0, 2.0, 0.0),
+          color: glMatrix.vec3.fromValues(0.8, 0.8, 1.0),
+        },
+        {
+          position: glMatrix.vec3.fromValues(2.0, 1.5, 1.5),
+          color: glMatrix.vec3.fromValues(1.0, 0.9, 0.8),
+        },
+      ];
+      const globalAmbient = glMatrix.vec3.fromValues(0.1, 0.1, 0.1);
+      const SHADOW_ATTENUATION = 0.4;
+      const MAX_REFLECTION_DEPTH = 5;
+
+      // --- Objek Scene ---
+      // Definisikan bola kaca di sini agar bisa diakses oleh event listener slider
+      const glassSphereMaterial = {
+        color: glMatrix.vec3.fromValues(0.95, 0.98, 1.0),
+        specularIntensity: 1.0,
+        shininess: 256.0,
+        reflectivity: 0.0,
+        transmissivity: 0.95,
+        ior: 1.52, // Nilai awal, akan diperbarui oleh slider
+      };
+
+      const spheres = [
+        {
+          center: glMatrix.vec3.fromValues(0.0, 0.0, -0.5),
+          radius: 0.5,
+          type: "sphere",
+          material: glassSphereMaterial, // Gunakan material yang bisa diubah
+        },
+        {
+          center: glMatrix.vec3.fromValues(-1.2, -0.2, -1.5),
+          radius: 0.3,
+          type: "sphere",
+          material: {
+            color: glMatrix.vec3.fromValues(1.0, 0.3, 0.3),
+            specularIntensity: 0.5,
+            shininess: 32.0,
+            reflectivity: 0.1,
+            transmissivity: 0.0,
+            ior: 1.5,
+          },
+        },
+      ];
+      const planes = [
+        {
+          point: glMatrix.vec3.fromValues(0.0, -0.55, 0.0),
+          normal: glMatrix.vec3.fromValues(0.0, 1.0, 0.0),
+          type: "plane",
+          material: {
+            checkerColor1: glMatrix.vec3.fromValues(0.5, 0.5, 0.5),
+            checkerColor2: glMatrix.vec3.fromValues(0.2, 0.2, 0.2),
+            checkerScale: 0.8,
+            specularIntensity: 0.05,
+            shininess: 8.0,
+            reflectivity: 0.1,
+            transmissivity: 0.0,
+            ior: 1.0,
+          },
+        },
+      ];
+      const sceneObjects = [...spheres, ...planes];
+
+      function intersectSphereJS(rayOrigin, rayDir, sphere) {
+        /* ... Sama ... */
+        const oc = glMatrix.vec3.create();
+        glMatrix.vec3.subtract(oc, rayOrigin, sphere.center);
+        const b = 2.0 * glMatrix.vec3.dot(oc, rayDir);
+        const c = glMatrix.vec3.dot(oc, oc) - sphere.radius * sphere.radius;
+        const discriminant = b * b - 4.0 * c;
+        if (discriminant < 0.0) {
+          return -1.0;
+        }
+        const sqrtDiscriminant = Math.sqrt(discriminant);
+        const t0 = (-b - sqrtDiscriminant) / 2.0;
+        const t1 = (-b + sqrtDiscriminant) / 2.0;
+        if (t0 > EPSILON) return t0;
+        if (t1 > EPSILON) return t1;
+        return -1.0;
+      }
+      function intersectPlaneJS(rayOrigin, rayDir, plane) {
+        /* ... Sama ... */
+        const normal = plane.normal;
+        const point = plane.point;
+        const denom = glMatrix.vec3.dot(rayDir, normal);
+        if (Math.abs(denom) < EPSILON) {
+          return -1.0;
+        }
+        const oc = glMatrix.vec3.create();
+        glMatrix.vec3.subtract(oc, point, rayOrigin);
+        const t = glMatrix.vec3.dot(oc, normal) / denom;
+        return t > EPSILON ? t : -1.0;
+      }
+
+      function traceRay(rayOrigin, rayDirection, depth, currentMediumIOR) {
+        // ... (Isi fungsi traceRay SAMA PERSIS seperti di respons sebelumnya yang ada grid background) ...
+        // ... (Pastikan menggunakan glassSphereMaterial.ior untuk bola kaca) ...
+        if (depth >= MAX_REFLECTION_DEPTH) {
+          return getGridBackgroundColor(rayDirection, rayOrigin);
+        }
+
+        let closest_t = Infinity;
+        let hitObject = null;
+        for (const obj of sceneObjects) {
+          let t = -1.0;
+          if (obj.type === "sphere") {
+            t = intersectSphereJS(rayOrigin, rayDirection, obj);
+          } else if (obj.type === "plane") {
+            t = intersectPlaneJS(rayOrigin, rayDirection, obj);
+          }
+          if (t > 0.0 && t < closest_t) {
+            closest_t = t;
+            hitObject = obj;
+          }
+        }
+
+        if (!hitObject) {
+          return getGridBackgroundColor(rayDirection, rayOrigin);
+        }
+
+        const mat = hitObject.material; // mat sekarang bisa jadi glassSphereMaterial
+        const hitPoint = glMatrix.vec3.create();
+        const normal = glMatrix.vec3.create();
+        const objectBaseColor = glMatrix.vec3.create();
+        const viewDir = glMatrix.vec3.create();
+
+        glMatrix.vec3.scaleAndAdd(hitPoint, rayOrigin, rayDirection, closest_t);
+        if (hitObject.type === "sphere") {
+          glMatrix.vec3.subtract(normal, hitPoint, hitObject.center);
+        } else if (hitObject.type === "plane") {
+          glMatrix.vec3.copy(normal, hitObject.normal);
+        }
+        glMatrix.vec3.normalize(normal, normal);
+
+        if (
+          hitObject.type === "plane" &&
+          mat.checkerColor1 &&
+          mat.checkerColor2
+        ) {
+          const scale = mat.checkerScale || 1.0;
+          const checkerSum =
+            Math.floor(hitPoint[0] / scale) + Math.floor(hitPoint[2] / scale);
+          glMatrix.vec3.copy(
+            objectBaseColor,
+            checkerSum % 2 !== 0 ? mat.checkerColor1 : mat.checkerColor2
+          );
+        } else {
+          glMatrix.vec3.copy(objectBaseColor, mat.color || [0, 0, 0]);
+        }
+
+        glMatrix.vec3.scale(viewDir, rayDirection, -1.0);
+        glMatrix.vec3.normalize(viewDir, viewDir);
+
+        const localPhongColor = glMatrix.vec3.create();
+        glMatrix.vec3.multiply(localPhongColor, globalAmbient, objectBaseColor);
+        const lightDir = glMatrix.vec3.create();
+        const shadowRayOrigin = glMatrix.vec3.create();
+        const diffuseTerm = glMatrix.vec3.create();
+        const specularTerm = glMatrix.vec3.create();
+        const lightReflectionVector = glMatrix.vec3.create();
+        const tempVec = glMatrix.vec3.create();
+        const negLightDir = glMatrix.vec3.create();
+        for (const light of lights) {
+          glMatrix.vec3.subtract(lightDir, light.position, hitPoint);
+          const distanceToLight = glMatrix.vec3.length(lightDir);
+          glMatrix.vec3.normalize(lightDir, lightDir);
+          let isInShadow = false;
+          glMatrix.vec3.scaleAndAdd(shadowRayOrigin, hitPoint, normal, EPSILON);
+          for (const shadowObj of sceneObjects) {
+            if (shadowObj === hitObject) continue;
+            let t_shadow = -1.0;
+            if (shadowObj.type === "sphere") {
+              t_shadow = intersectSphereJS(
+                shadowRayOrigin,
+                lightDir,
+                shadowObj
+              );
+            } else if (shadowObj.type === "plane") {
+              t_shadow = intersectPlaneJS(shadowRayOrigin, lightDir, shadowObj);
+            }
+            if (t_shadow > 0.0 && t_shadow < distanceToLight) {
+              isInShadow = true;
+              break;
+            }
+          }
+          const shadowFactor = isInShadow ? SHADOW_ATTENUATION : 1.0;
+          glMatrix.vec3.set(diffuseTerm, 0, 0, 0);
+          const NdotL = glMatrix.vec3.dot(normal, lightDir);
+          if (NdotL > 0.0) {
+            glMatrix.vec3.multiply(tempVec, objectBaseColor, light.color);
+            glMatrix.vec3.scale(diffuseTerm, tempVec, NdotL * shadowFactor);
+          }
+          glMatrix.vec3.set(specularTerm, 0, 0, 0);
+          if (NdotL > 0.0) {
+            glMatrix.vec3.scale(negLightDir, lightDir, -1.0);
+            customVec3Reflect(lightReflectionVector, negLightDir, normal);
+            const RdotV = Math.max(
+              0.0,
+              glMatrix.vec3.dot(lightReflectionVector, viewDir)
+            );
+            const specularFactor = Math.pow(RdotV, mat.shininess);
+            glMatrix.vec3.scale(
+              specularTerm,
+              light.color,
+              (mat.specularIntensity || 0) * specularFactor * shadowFactor
+            );
+          }
+          glMatrix.vec3.add(localPhongColor, localPhongColor, diffuseTerm);
+          glMatrix.vec3.add(localPhongColor, localPhongColor, specularTerm);
+        }
+
+        let finalColor = glMatrix.vec3.create();
+        const reflectivity = mat.reflectivity || 0.0;
+        const transmissivity = mat.transmissivity || 0.0;
+        // Gunakan mat.ior yang bisa diperbarui oleh slider
+        const objIOR = mat.ior || IOR_AIR;
+        let reflectedRayColor = glMatrix.vec3.fromValues(0, 0, 0);
+        let refractedRayColor = glMatrix.vec3.fromValues(0, 0, 0);
+        let tirOccurred = false;
+        let fresnelReflectance = reflectivity;
+
+        if (reflectivity > 0 || transmissivity > 0) {
+          const reflectionDir = glMatrix.vec3.create();
+          customVec3Reflect(reflectionDir, rayDirection, normal);
+          const reflectionOrigin = glMatrix.vec3.create();
+          glMatrix.vec3.scaleAndAdd(
+            reflectionOrigin,
+            hitPoint,
+            normal,
+            EPSILON
+          );
+          reflectedRayColor = traceRay(
+            reflectionOrigin,
+            reflectionDir,
+            depth + 1,
+            currentMediumIOR
+          );
+        }
+
+        if (transmissivity > 0.0 && objIOR > 0.0) {
+          const refractionDir = glMatrix.vec3.create();
+          let n1 = currentMediumIOR;
+          let n2 = objIOR; // objIOR dari mat.ior
+          let N_refract = glMatrix.vec3.clone(normal);
+          let cosIncident = glMatrix.vec3.dot(rayDirection, normal);
+          if (cosIncident > 0) {
+            n1 = objIOR;
+            n2 = currentMediumIOR;
+            glMatrix.vec3.scale(N_refract, N_refract, -1);
+          }
+          if (refract(refractionDir, rayDirection, N_refract, n1, n2)) {
+            const refractionOrigin = glMatrix.vec3.create();
+            glMatrix.vec3.scaleAndAdd(
+              refractionOrigin,
+              hitPoint,
+              refractionDir,
+              EPSILON
+            );
+            refractedRayColor = traceRay(
+              refractionOrigin,
+              refractionDir,
+              depth + 1,
+              n2
+            );
+          } else {
+            tirOccurred = true;
+          }
+          let cosTheta_fresnel = glMatrix.vec3.dot(viewDir, normal);
+          fresnelReflectance = schlickFresnel(cosTheta_fresnel, n1, n2);
+        }
+
+        if (transmissivity > 0.0 && objIOR > 0.0) {
+          if (tirOccurred) {
+            glMatrix.vec3.copy(finalColor, reflectedRayColor);
+          } else {
+            const reflectedPart = glMatrix.vec3.create();
+            const refractedPart = glMatrix.vec3.create();
+            glMatrix.vec3.scale(
+              reflectedPart,
+              reflectedRayColor,
+              fresnelReflectance
+            );
+            glMatrix.vec3.scale(
+              refractedPart,
+              refractedRayColor,
+              (1.0 - fresnelReflectance) * transmissivity
+            );
+            glMatrix.vec3.add(finalColor, reflectedPart, refractedPart);
+            const absorptionFactor =
+              (1.0 - transmissivity) * (1.0 - fresnelReflectance);
+            if (absorptionFactor > 0 && mat.color) {
+              // Pastikan mat.color ada
+              const absorbedColor = glMatrix.vec3.create();
+              glMatrix.vec3.scale(
+                absorbedColor,
+                objectBaseColor,
+                absorptionFactor * 0.2
+              );
+              glMatrix.vec3.add(finalColor, finalColor, absorbedColor);
+            }
+          }
+        } else {
+          const nonReflectivePart = glMatrix.vec3.create();
+          glMatrix.vec3.scale(
+            nonReflectivePart,
+            localPhongColor,
+            1.0 - reflectivity
+          );
+          const reflectivePart = glMatrix.vec3.create();
+          glMatrix.vec3.scale(reflectivePart, reflectedRayColor, reflectivity);
+          glMatrix.vec3.add(finalColor, nonReflectivePart, reflectivePart);
+        }
+
+        glMatrix.vec3.max(finalColor, finalColor, [0, 0, 0]);
+        glMatrix.vec3.min(finalColor, finalColor, [1, 1, 1]);
+        return finalColor;
+      }
+
+      let isRendering = false; // Flag untuk mencegah render bertumpuk
+      let debounceTimeout;
+
+      function renderSceneCPU() {
+        if (isRendering) {
+          console.log("Render sedang berjalan, permintaan baru diabaikan.");
+          return;
+        }
+        isRendering = true;
+        console.time("CPU Ray Trace Render Interactive IOR");
+
+        const canvas = document.getElementById("cpu-canvas");
+        const ctx = canvas.getContext("2d");
+        if (!ctx) {
+          console.error("Canvas 2D tidak tersedia.");
+          isRendering = false;
+          return;
+        }
+        const width = canvas.width;
+        const height = canvas.height;
+        const aspectRatio = width / height;
+        const imageData = ctx.createImageData(width, height);
+        const data = imageData.data;
+        const primaryRayDir = glMatrix.vec3.create();
+        const pixelColorVec = glMatrix.vec3.create();
+
+        // Loop bisa memakan waktu, jadi kita tidak bisa langsung memblok event loop
+        // Untuk interaktivitas yang lebih baik, idealnya ini dipecah atau menggunakan Web Workers
+        // Tapi untuk sekarang, kita jalankan secara sinkron
+        for (let y = 0; y < height; ++y) {
+          for (let x = 0; x < width; ++x) {
+            const ndcX = ((x + 0.5) / width) * 2.0 - 1.0;
+            const ndcY = (1.0 - (y + 0.5) / height) * 2.0 - 1.0;
+            glMatrix.vec3.set(primaryRayDir, ndcX * aspectRatio, ndcY, -1.0);
+            glMatrix.vec3.normalize(primaryRayDir, primaryRayDir);
+            glMatrix.vec3.copy(
+              pixelColorVec,
+              traceRay(cameraPos, primaryRayDir, 0, IOR_AIR)
+            );
+            const pixelIndex = (y * width + x) * 4;
+            data[pixelIndex] = Math.floor(pixelColorVec[0] * 255);
+            data[pixelIndex + 1] = Math.floor(pixelColorVec[1] * 255);
+            data[pixelIndex + 2] = Math.floor(pixelColorVec[2] * 255);
+            data[pixelIndex + 3] = 255;
+          }
+        }
+        ctx.putImageData(imageData, 0, 0);
+        console.timeEnd("CPU Ray Trace Render Interactive IOR");
+        isRendering = false;
+      }
+
+      // --- Setup Interaktivitas Slider ---
+      const iorSlider = document.getElementById("iorSlider");
+      const iorValueDisplay = document.getElementById("iorValue");
+
+      // Fungsi untuk me-render ulang dengan debounce
+      function requestRender() {
+        clearTimeout(debounceTimeout);
+        if (!isRendering) {
+          // Hanya set timeout jika tidak sedang merender
+          debounceTimeout = setTimeout(() => {
+            renderSceneCPU();
+          }, 50); // Debounce 50ms (sesuaikan jika perlu)
+        }
+      }
+
+      iorSlider.addEventListener("input", function () {
+        const newIOR = parseFloat(this.value);
+        glassSphereMaterial.ior = newIOR; // Perbarui IOR di material bola kaca
+        iorValueDisplay.textContent = newIOR.toFixed(2);
+
+        // Panggil renderSceneCPU. Karena render bisa lama, mungkin perlu debounce
+        // atau cara lain agar tidak terlalu berat saat slider digeser cepat.
+        requestRender();
+      });
+
+      // Render awal saat halaman dimuat
+      window.onload = function () {
+        iorValueDisplay.textContent = parseFloat(iorSlider.value).toFixed(2); // Set tampilan awal
+        renderSceneCPU();
+      };
+    </script>
+  </body>
+</html>
