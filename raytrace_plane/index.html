@@ -1,0 +1,265 @@
+<!DOCTYPE html>
+<html lang="id">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>CPU Ray Tracing - Centered Spheres</title>
+    <style>
+      body {
+        margin: 0;
+        padding: 0;
+        display: flex;
+        justify-content: center;
+        align-items: center;
+        min-height: 100vh;
+        background-color: #333;
+      }
+      canvas {
+        border: 1px solid black;
+        display: block;
+      }
+    </style>
+  </head>
+  <body>
+    <canvas id="cpu-canvas" width="500" height="500"></canvas>
+
+    <script src="https://cdn.jsdelivr.net/npm/gl-matrix@3.4.3/gl-matrix-min.js"></script>
+
+    <script>
+      "use strict";
+
+      // --- Konfigurasi Scene & Pencahayaan (Sama) ---
+      const cameraPos = glMatrix.vec3.fromValues(0.0, 0.8, 0.0);
+      const backgroundColor = [0.1, 0.1, 0.15, 1.0];
+      const lightPos = glMatrix.vec3.fromValues(3.0, 5.0, -1.0);
+      const lightColor = glMatrix.vec3.fromValues(1.0, 1.0, 1.0);
+      const globalAmbient = glMatrix.vec3.fromValues(0.2, 0.2, 0.25);
+
+      // --- Objek Scene (Dengan Posisi Y Bola Diubah) ---
+      const spheres = [
+        {
+          center: glMatrix.vec3.fromValues(-0.4, 0.1, -1.5),
+          radius: 0.5,
+          type: "sphere",
+          material: {
+            color: glMatrix.vec3.fromValues(1.0, 0.3, 0.3),
+            specularIntensity: 0.8,
+            shininess: 32.0,
+          },
+        },
+        {
+          center: glMatrix.vec3.fromValues(0.3, 0.3, -2.1),
+          radius: 0.7,
+          type: "sphere",
+          material: {
+            color: glMatrix.vec3.fromValues(0.3, 0.5, 1.0),
+            specularIntensity: 0.5,
+            shininess: 16.0,
+          },
+        },
+      ];
+
+      const planes = [
+        // Plane tetap sama
+        {
+          point: glMatrix.vec3.fromValues(0.0, -0.5, 0.0),
+          normal: glMatrix.vec3.fromValues(0.0, 1.0, 0.0),
+          type: "plane",
+          material: {
+            checkerColor1: glMatrix.vec3.fromValues(0.9, 0.9, 0.9),
+            checkerColor2: glMatrix.vec3.fromValues(0.2, 0.2, 0.2),
+            checkerScale: 1.0,
+            specularIntensity: 0.1,
+            shininess: 8.0,
+          },
+        },
+      ];
+
+      const sceneObjects = [...spheres, ...planes];
+
+      // --- Fungsi Ray Tracing di CPU (Semua fungsi helper sama) ---
+      const EPSILON = 0.001;
+      function intersectSphereJS(rayOrigin, rayDir, sphere) {
+        /* ... Sama ... */
+        const oc = glMatrix.vec3.create();
+        glMatrix.vec3.subtract(oc, rayOrigin, sphere.center);
+        const b = 2.0 * glMatrix.vec3.dot(oc, rayDir);
+        const c = glMatrix.vec3.dot(oc, oc) - sphere.radius * sphere.radius;
+        const discriminant = b * b - 4.0 * c;
+        if (discriminant < 0.0) {
+          return -1.0;
+        } else {
+          const sqrtDiscriminant = Math.sqrt(discriminant);
+          const t0 = (-b - sqrtDiscriminant) / 2.0;
+          const t1 = (-b + sqrtDiscriminant) / 2.0;
+          if (t0 > EPSILON) return t0;
+          else if (t1 > EPSILON) return t1;
+          else return -1.0;
+        }
+      }
+      function intersectPlaneJS(rayOrigin, rayDir, plane) {
+        /* ... Sama ... */
+        const normal = plane.normal;
+        const point = plane.point;
+        const denom = glMatrix.vec3.dot(rayDir, normal);
+        if (Math.abs(denom) < EPSILON) {
+          return -1.0;
+        }
+        const oc = glMatrix.vec3.create();
+        glMatrix.vec3.subtract(oc, point, rayOrigin);
+        const t = glMatrix.vec3.dot(oc, normal) / denom;
+        return t > EPSILON ? t : -1.0;
+      }
+
+      // Fungsi utama renderSceneCPU (Logika inti sama, hanya data objek yg berubah)
+      function renderSceneCPU() {
+        const canvas = document.getElementById("cpu-canvas");
+        const ctx = canvas.getContext("2d");
+        if (!ctx) {
+          console.error("Canvas 2D tidak tersedia.");
+          alert("Tidak bisa mendapatkan konteks Canvas 2D.");
+          return;
+        }
+        const width = canvas.width;
+        const height = canvas.height;
+        const aspectRatio = width / height;
+        const imageData = ctx.createImageData(width, height);
+        const data = imageData.data;
+
+        console.time("CPU Ray Trace Render Centered");
+
+        // Vektor bantu (sama)
+        const rayDir = glMatrix.vec3.create();
+        const hitPoint = glMatrix.vec3.create();
+        const normal = glMatrix.vec3.create();
+        const lightDir = glMatrix.vec3.create();
+        const viewDir = glMatrix.vec3.create();
+        const reflectDir = glMatrix.vec3.create();
+        const tempVec = glMatrix.vec3.create();
+        const ambientTerm = glMatrix.vec3.create();
+        const diffuseTerm = glMatrix.vec3.create();
+        const specularTerm = glMatrix.vec3.create();
+        const finalColorVec = glMatrix.vec3.create();
+        const objectBaseColor = glMatrix.vec3.create();
+
+        // Loop piksel (sama)
+        for (let y = 0; y < height; ++y) {
+          for (let x = 0; x < width; ++x) {
+            // 1. Hitung Ray (sama)
+            const ndcX = ((x + 0.5) / width) * 2.0 - 1.0;
+            const ndcY = (1.0 - (y + 0.5) / height) * 2.0 - 1.0;
+            glMatrix.vec3.set(rayDir, ndcX * aspectRatio, ndcY, -1.0);
+            glMatrix.vec3.subtract(rayDir, rayDir, cameraPos);
+            glMatrix.vec3.normalize(rayDir, rayDir);
+
+            // 2. Cari Intersection (sama)
+            let closest_t = Infinity;
+            let hitObject = null;
+            for (const obj of sceneObjects) {
+              //<- Menggunakan data spheres yg sudah diubah
+              let t = -1.0;
+              if (obj.type === "sphere") {
+                t = intersectSphereJS(cameraPos, rayDir, obj);
+              } else if (obj.type === "plane") {
+                t = intersectPlaneJS(cameraPos, rayDir, obj);
+              }
+              if (t > 0.0 && t < closest_t) {
+                closest_t = t;
+                hitObject = obj;
+              }
+            }
+
+            // 3. Hitung Warna (sama, termasuk checkerboard)
+            let finalR = backgroundColor[0];
+            let finalG = backgroundColor[1];
+            let finalB = backgroundColor[2];
+
+            if (hitObject) {
+              const mat = hitObject.material;
+              glMatrix.vec3.scale(hitPoint, rayDir, closest_t);
+              glMatrix.vec3.add(hitPoint, cameraPos, hitPoint);
+              if (hitObject.type === "sphere") {
+                glMatrix.vec3.subtract(normal, hitPoint, hitObject.center);
+              } else if (hitObject.type === "plane") {
+                glMatrix.vec3.copy(normal, hitObject.normal);
+              }
+              glMatrix.vec3.normalize(normal, normal);
+
+              // Tentukan Base Color (checker atau solid)
+              if (
+                hitObject.type === "plane" &&
+                mat.checkerColor1 &&
+                mat.checkerColor2
+              ) {
+                const scale = mat.checkerScale || 1.0;
+                const checkerSum =
+                  Math.floor(hitPoint[0] / scale) +
+                  Math.floor(hitPoint[2] / scale);
+                if (checkerSum % 2 !== 0) {
+                  glMatrix.vec3.copy(objectBaseColor, mat.checkerColor1);
+                } else {
+                  glMatrix.vec3.copy(objectBaseColor, mat.checkerColor2);
+                }
+              } else {
+                glMatrix.vec3.copy(objectBaseColor, mat.color);
+              }
+
+              // Hitung Vektor Lighting (sama)
+              glMatrix.vec3.subtract(lightDir, lightPos, hitPoint);
+              glMatrix.vec3.normalize(lightDir, lightDir);
+              glMatrix.vec3.subtract(viewDir, cameraPos, hitPoint);
+              glMatrix.vec3.normalize(viewDir, viewDir);
+              glMatrix.vec3.scale(tempVec, lightDir, -1);
+              const dotNLReflection = glMatrix.vec3.dot(normal, tempVec);
+              glMatrix.vec3.scale(reflectDir, normal, 2.0 * dotNLReflection);
+              glMatrix.vec3.subtract(reflectDir, tempVec, reflectDir);
+              glMatrix.vec3.normalize(reflectDir, reflectDir);
+
+              // Hitung Phong (sama)
+              glMatrix.vec3.multiply(
+                ambientTerm,
+                globalAmbient,
+                objectBaseColor
+              );
+              const diffuseFactor = Math.max(
+                0.0,
+                glMatrix.vec3.dot(normal, lightDir)
+              );
+              glMatrix.vec3.multiply(diffuseTerm, objectBaseColor, lightColor);
+              glMatrix.vec3.scale(diffuseTerm, diffuseTerm, diffuseFactor);
+              const specularFactor = Math.pow(
+                Math.max(0.0, glMatrix.vec3.dot(reflectDir, viewDir)),
+                mat.shininess
+              );
+              glMatrix.vec3.scale(
+                specularTerm,
+                lightColor,
+                mat.specularIntensity * specularFactor
+              );
+              glMatrix.vec3.add(finalColorVec, ambientTerm, diffuseTerm);
+              glMatrix.vec3.add(finalColorVec, finalColorVec, specularTerm);
+              finalR = Math.min(1.0, Math.max(0.0, finalColorVec[0]));
+              finalG = Math.min(1.0, Math.max(0.0, finalColorVec[1]));
+              finalB = Math.min(1.0, Math.max(0.0, finalColorVec[2]));
+            }
+
+            // 4. Set Piksel (sama)
+            const pixelIndex = (y * width + x) * 4;
+            data[pixelIndex] = Math.floor(finalR * 255);
+            data[pixelIndex + 1] = Math.floor(finalG * 255);
+            data[pixelIndex + 2] = Math.floor(finalB * 255);
+            data[pixelIndex + 3] = 255;
+          }
+        }
+
+        console.timeEnd("CPU Ray Trace Render Centered");
+
+        // 5. Tampilkan Hasil (sama)
+        ctx.putImageData(imageData, 0, 0);
+        console.log("CPU Ray Tracing Centered Selesai.");
+      }
+
+      window.onload = renderSceneCPU;
+    </script>
+  </body>
+</html>

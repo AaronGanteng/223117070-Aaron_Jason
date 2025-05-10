@@ -1,0 +1,354 @@
+<!DOCTYPE html>
+<html lang="id">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>CPU Ray Tracing - Reflections (Diperbaiki - Reflect Error)</title>
+    <style>
+      body {
+        margin: 0;
+        padding: 0;
+        display: flex;
+        justify-content: center;
+        align-items: center;
+        min-height: 100vh;
+        background-color: #333;
+      }
+      canvas {
+        border: 1px solid black;
+        display: block;
+      }
+    </style>
+  </head>
+  <body>
+    <canvas id="cpu-canvas" width="500" height="500"></canvas>
+
+    <script src="https://cdn.jsdelivr.net/npm/gl-matrix@3.4.3/gl-matrix-min.js"></script>
+
+    <script>
+      "use strict";
+
+      // --- Fungsi Helper untuk Refleksi (Pengganti jika glMatrix.vec3.reflect tidak ditemukan) ---
+      function customVec3Reflect(out, incidentVec, normalVec) {
+        // Formula: R = I - 2 * dot(N, I) * N
+        // incidentVec (I): vektor datang
+        // normalVec (N): vektor normal permukaan (diasumsikan sudah ternormalisasi)
+        // out (R): vektor hasil refleksi
+        const dotProductTimesTwo =
+          2.0 * glMatrix.vec3.dot(incidentVec, normalVec);
+        out[0] = incidentVec[0] - normalVec[0] * dotProductTimesTwo;
+        out[1] = incidentVec[1] - normalVec[1] * dotProductTimesTwo;
+        out[2] = incidentVec[2] - normalVec[2] * dotProductTimesTwo;
+        return out;
+      }
+
+      // --- Konfigurasi Scene & Pencahayaan ---
+      const cameraPos = glMatrix.vec3.fromValues(0.0, 0.5, 0.0);
+      const backgroundColor = glMatrix.vec3.fromValues(0.1, 0.1, 0.15);
+
+      const lights = [
+        {
+          position: glMatrix.vec3.fromValues(-2.0, 1.5, -0.5),
+          color: glMatrix.vec3.fromValues(0.8, 0.8, 1.0),
+        },
+        {
+          position: glMatrix.vec3.fromValues(1.5, 2.5, -1.0),
+          color: glMatrix.vec3.fromValues(1.0, 0.9, 0.8),
+        },
+      ];
+      const globalAmbient = glMatrix.vec3.fromValues(0.15, 0.15, 0.2);
+      const SHADOW_ATTENUATION = 0.3;
+      const MAX_REFLECTION_DEPTH = 5;
+
+      // --- Objek Scene ---
+      const spheres = [
+        {
+          center: glMatrix.vec3.fromValues(-0.4, 0.0, -1.5),
+          radius: 0.5,
+          type: "sphere",
+          material: {
+            color: glMatrix.vec3.fromValues(1.0, 0.3, 0.3),
+            specularIntensity: 0.8,
+            shininess: 32.0,
+            reflectivity: 0.3,
+          },
+        },
+        {
+          center: glMatrix.vec3.fromValues(0.3, 0.2, -2.1),
+          radius: 0.7,
+          type: "sphere",
+          material: {
+            color: glMatrix.vec3.fromValues(0.3, 0.5, 1.0),
+            specularIntensity: 0.5,
+            shininess: 16.0,
+            reflectivity: 0.3,
+          },
+        },
+      ];
+      const planes = [
+        {
+          point: glMatrix.vec3.fromValues(0.0, -0.5, 0.0),
+          normal: glMatrix.vec3.fromValues(0.0, 1.0, 0.0),
+          type: "plane",
+          material: {
+            checkerColor1: glMatrix.vec3.fromValues(0.9, 0.9, 0.9),
+            checkerColor2: glMatrix.vec3.fromValues(0.2, 0.2, 0.2),
+            checkerScale: 0.5,
+            specularIntensity: 0.1,
+            shininess: 8.0,
+            reflectivity: 0.7,
+          },
+        },
+      ];
+      const sceneObjects = [...spheres, ...planes];
+
+      // --- Fungsi Ray Tracing di CPU ---
+      const EPSILON = 0.001;
+
+      function intersectSphereJS(rayOrigin, rayDir, sphere) {
+        const oc = glMatrix.vec3.create();
+        glMatrix.vec3.subtract(oc, rayOrigin, sphere.center);
+        const b = 2.0 * glMatrix.vec3.dot(oc, rayDir);
+        const c = glMatrix.vec3.dot(oc, oc) - sphere.radius * sphere.radius;
+        const discriminant = b * b - 4.0 * c;
+        if (discriminant < 0.0) {
+          return -1.0;
+        } else {
+          const sqrtDiscriminant = Math.sqrt(discriminant);
+          const t0 = (-b - sqrtDiscriminant) / 2.0;
+          const t1 = (-b + sqrtDiscriminant) / 2.0;
+          if (t0 > EPSILON) return t0;
+          else if (t1 > EPSILON) return t1;
+          else return -1.0;
+        }
+      }
+
+      function intersectPlaneJS(rayOrigin, rayDir, plane) {
+        const normal = plane.normal;
+        const point = plane.point;
+        const denom = glMatrix.vec3.dot(rayDir, normal);
+        if (Math.abs(denom) < EPSILON) {
+          return -1.0;
+        }
+        const oc = glMatrix.vec3.create();
+        glMatrix.vec3.subtract(oc, point, rayOrigin);
+        const t = glMatrix.vec3.dot(oc, normal) / denom;
+        return t > EPSILON ? t : -1.0;
+      }
+
+      function traceRay(rayOrigin, rayDirection, depth) {
+        if (depth >= MAX_REFLECTION_DEPTH) {
+          return backgroundColor;
+        }
+
+        let closest_t = Infinity;
+        let hitObject = null;
+        for (const obj of sceneObjects) {
+          let t = -1.0;
+          if (obj.type === "sphere") {
+            t = intersectSphereJS(rayOrigin, rayDirection, obj);
+          } else if (obj.type === "plane") {
+            t = intersectPlaneJS(rayOrigin, rayDirection, obj);
+          }
+          if (t > 0.0 && t < closest_t) {
+            closest_t = t;
+            hitObject = obj;
+          }
+        }
+
+        if (!hitObject) {
+          return backgroundColor;
+        }
+
+        const mat = hitObject.material;
+        const hitPoint = glMatrix.vec3.create();
+        const normal = glMatrix.vec3.create(); // Normal permukaan di titik potong
+        const objectBaseColor = glMatrix.vec3.create();
+        const localColor = glMatrix.vec3.create();
+        const viewDir = glMatrix.vec3.create(); // Vektor dari titik potong ke mata/asal sinar
+
+        glMatrix.vec3.scaleAndAdd(hitPoint, rayOrigin, rayDirection, closest_t);
+        if (hitObject.type === "sphere") {
+          glMatrix.vec3.subtract(normal, hitPoint, hitObject.center);
+        } else if (hitObject.type === "plane") {
+          glMatrix.vec3.copy(normal, hitObject.normal);
+        }
+        glMatrix.vec3.normalize(normal, normal); // Pastikan normal ternormalisasi
+
+        if (
+          hitObject.type === "plane" &&
+          mat.checkerColor1 &&
+          mat.checkerColor2
+        ) {
+          const scale = mat.checkerScale || 1.0;
+          const checkerSum =
+            Math.floor(hitPoint[0] / scale) + Math.floor(hitPoint[2] / scale);
+          if (checkerSum % 2 !== 0) {
+            glMatrix.vec3.copy(objectBaseColor, mat.checkerColor1);
+          } else {
+            glMatrix.vec3.copy(objectBaseColor, mat.checkerColor2);
+          }
+        } else {
+          glMatrix.vec3.copy(objectBaseColor, mat.color);
+        }
+
+        glMatrix.vec3.scale(viewDir, rayDirection, -1.0); // viewDir = -rayDirection
+        glMatrix.vec3.normalize(viewDir, viewDir);
+
+        glMatrix.vec3.multiply(localColor, globalAmbient, objectBaseColor);
+        const lightDir = glMatrix.vec3.create();
+        const shadowRayOrigin = glMatrix.vec3.create();
+        const diffuseTerm = glMatrix.vec3.create();
+        const specularTerm = glMatrix.vec3.create();
+        const lightReflectionVector = glMatrix.vec3.create(); // Vektor refleksi cahaya untuk specular
+        const tempVec = glMatrix.vec3.create();
+        const negLightDir = glMatrix.vec3.create(); // Untuk specular
+
+        for (const light of lights) {
+          glMatrix.vec3.subtract(lightDir, light.position, hitPoint);
+          const distanceToLight = glMatrix.vec3.length(lightDir);
+          glMatrix.vec3.normalize(lightDir, lightDir);
+          let isInShadow = false;
+          glMatrix.vec3.scaleAndAdd(shadowRayOrigin, hitPoint, normal, EPSILON);
+          for (const shadowObj of sceneObjects) {
+            if (shadowObj === hitObject) continue;
+            let t_shadow = -1.0;
+            if (shadowObj.type === "sphere") {
+              t_shadow = intersectSphereJS(
+                shadowRayOrigin,
+                lightDir,
+                shadowObj
+              );
+            } else if (shadowObj.type === "plane") {
+              t_shadow = intersectPlaneJS(shadowRayOrigin, lightDir, shadowObj);
+            }
+            if (t_shadow > 0.0 && t_shadow < distanceToLight) {
+              isInShadow = true;
+              break;
+            }
+          }
+          const shadowFactor = isInShadow ? SHADOW_ATTENUATION : 1.0;
+
+          glMatrix.vec3.set(diffuseTerm, 0, 0, 0);
+          const NdotL = glMatrix.vec3.dot(normal, lightDir);
+          if (NdotL > 0.0) {
+            glMatrix.vec3.multiply(tempVec, objectBaseColor, light.color);
+            glMatrix.vec3.scale(diffuseTerm, tempVec, NdotL * shadowFactor);
+          }
+
+          glMatrix.vec3.set(specularTerm, 0, 0, 0);
+          if (NdotL > 0.0) {
+            glMatrix.vec3.scale(negLightDir, lightDir, -1.0); // Vektor DARI permukaan KE cahaya
+            // Ganti glMatrix.vec3.reflect dengan customVec3Reflect
+            customVec3Reflect(lightReflectionVector, negLightDir, normal);
+            // glMatrix.vec3.reflect(lightReflectionVector, negLightDir, normal); // Baris asli
+
+            const RdotV = Math.max(
+              0.0,
+              glMatrix.vec3.dot(lightReflectionVector, viewDir)
+            );
+            const specularFactor = Math.pow(RdotV, mat.shininess);
+            const specularIntensityFactor =
+              mat.specularIntensity * shadowFactor;
+            glMatrix.vec3.scale(
+              specularTerm,
+              light.color,
+              specularIntensityFactor * specularFactor
+            );
+          }
+          glMatrix.vec3.add(localColor, localColor, diffuseTerm);
+          glMatrix.vec3.add(localColor, localColor, specularTerm);
+        }
+
+        const reflectivity = mat.reflectivity || 0.0;
+        const finalColor = glMatrix.vec3.create();
+
+        if (reflectivity > 0.0 && depth < MAX_REFLECTION_DEPTH) {
+          const reflectionDir = glMatrix.vec3.create(); // Vektor arah sinar yang direfleksikan
+
+          // Ganti glMatrix.vec3.reflect dengan customVec3Reflect
+          // rayDirection adalah vektor insiden (datang)
+          // normal adalah normal permukaan
+          customVec3Reflect(reflectionDir, rayDirection, normal);
+          // glMatrix.vec3.reflect(reflectionDir, rayDirection, normal); // Baris asli yang menyebabkan error (baris 236)
+
+          const reflectionOrigin = glMatrix.vec3.create();
+          glMatrix.vec3.scaleAndAdd(
+            reflectionOrigin,
+            hitPoint,
+            normal,
+            EPSILON
+          );
+
+          const reflectionColor = traceRay(
+            reflectionOrigin,
+            reflectionDir,
+            depth + 1
+          );
+
+          glMatrix.vec3.lerp(
+            finalColor,
+            localColor,
+            reflectionColor,
+            reflectivity
+          );
+        } else {
+          glMatrix.vec3.copy(finalColor, localColor);
+        }
+
+        glMatrix.vec3.max(finalColor, finalColor, [0, 0, 0]);
+        glMatrix.vec3.min(finalColor, finalColor, [1, 1, 1]);
+
+        return finalColor;
+      }
+
+      function renderSceneCPU() {
+        const canvas = document.getElementById("cpu-canvas");
+        const ctx = canvas.getContext("2d");
+        if (!ctx) {
+          console.error("Canvas 2D tidak tersedia.");
+          alert("Tidak bisa mendapatkan konteks Canvas 2D.");
+          return;
+        }
+        const width = canvas.width;
+        const height = canvas.height;
+        const aspectRatio = width / height;
+        const imageData = ctx.createImageData(width, height);
+        const data = imageData.data;
+
+        console.time("CPU Ray Trace Render Reflections");
+
+        const primaryRayDir = glMatrix.vec3.create();
+        const pixelColorVec = glMatrix.vec3.create();
+
+        for (let y = 0; y < height; ++y) {
+          for (let x = 0; x < width; ++x) {
+            const ndcX = ((x + 0.5) / width) * 2.0 - 1.0;
+            const ndcY = (1.0 - (y + 0.5) / height) * 2.0 - 1.0;
+
+            glMatrix.vec3.set(primaryRayDir, ndcX * aspectRatio, ndcY, -1.0);
+            glMatrix.vec3.normalize(primaryRayDir, primaryRayDir);
+
+            // Panggilan ke traceRay (baris 334 menurut error sebelumnya, jika terjadi di sini)
+            glMatrix.vec3.copy(
+              pixelColorVec,
+              traceRay(cameraPos, primaryRayDir, 0)
+            );
+
+            const pixelIndex = (y * width + x) * 4;
+            data[pixelIndex] = Math.floor(pixelColorVec[0] * 255);
+            data[pixelIndex + 1] = Math.floor(pixelColorVec[1] * 255);
+            data[pixelIndex + 2] = Math.floor(pixelColorVec[2] * 255);
+            data[pixelIndex + 3] = 255;
+          }
+        }
+
+        console.timeEnd("CPU Ray Trace Render Reflections");
+        ctx.putImageData(imageData, 0, 0);
+        console.log("CPU Ray Tracing Reflections Selesai.");
+      }
+
+      window.onload = renderSceneCPU;
+    </script>
+  </body>
+</html>

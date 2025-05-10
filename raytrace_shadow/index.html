@@ -1,0 +1,346 @@
+<!DOCTYPE html>
+<html lang="id">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>CPU Ray Tracing - Multiple Lights & Shadows</title>
+    <style>
+      body {
+        margin: 0;
+        padding: 0;
+        display: flex;
+        justify-content: center;
+        align-items: center;
+        min-height: 100vh;
+        background-color: #333;
+      }
+      canvas {
+        border: 1px solid black;
+        display: block;
+      }
+    </style>
+  </head>
+  <body>
+    <canvas id="cpu-canvas" width="500" height="500"></canvas>
+
+    <script src="https://cdn.jsdelivr.net/npm/gl-matrix@3.4.3/gl-matrix-min.js"></script>
+
+    <script>
+      "use strict";
+
+      // --- Konfigurasi Scene & Pencahayaan ---
+      const cameraPos = glMatrix.vec3.fromValues(0.0, 0.8, 0.0);
+      const backgroundColor = [0.1, 0.1, 0.15, 1.0];
+
+      // *** BARU: Array Sumber Cahaya ***
+      const lights = [
+        {
+          position: glMatrix.vec3.fromValues(-2.0, 1.5, -0.5),
+          color: glMatrix.vec3.fromValues(0.8, 0.8, 1.0),
+        }, // Cahaya 1: Kebiruan, Kiri Atas Depan
+        {
+          position: glMatrix.vec3.fromValues(1.5, 2.5, -1.0),
+          color: glMatrix.vec3.fromValues(1.0, 0.9, 0.8),
+        }, // Cahaya 2: Kekuningan, Kanan Atas Depan
+      ];
+      // const lightColor = glMatrix.vec3.fromValues(1.0, 1.0, 1.0); // Tidak dipakai lagi
+      const globalAmbient = glMatrix.vec3.fromValues(0.15, 0.15, 0.2); // Sedikit turunkan ambient
+
+      // Faktor pengurangan cahaya saat dalam bayangan
+      const SHADOW_ATTENUATION = 0.3;
+
+      // --- Objek Scene (Sama) ---
+      const spheres = [
+        {
+          center: glMatrix.vec3.fromValues(-0.4, 0.1, -1.5),
+          radius: 0.5,
+          type: "sphere",
+          material: {
+            color: glMatrix.vec3.fromValues(1.0, 0.3, 0.3),
+            specularIntensity: 0.8,
+            shininess: 32.0,
+          },
+        },
+        {
+          center: glMatrix.vec3.fromValues(0.3, 0.3, -2.1),
+          radius: 0.7,
+          type: "sphere",
+          material: {
+            color: glMatrix.vec3.fromValues(0.3, 0.5, 1.0),
+            specularIntensity: 0.5,
+            shininess: 16.0,
+          },
+        },
+      ];
+      const planes = [
+        {
+          point: glMatrix.vec3.fromValues(0.0, -0.5, 0.0),
+          normal: glMatrix.vec3.fromValues(0.0, 1.0, 0.0),
+          type: "plane",
+          material: {
+            checkerColor1: glMatrix.vec3.fromValues(0.9, 0.9, 0.9),
+            checkerColor2: glMatrix.vec3.fromValues(0.2, 0.2, 0.2),
+            checkerScale: 0.5,
+            specularIntensity: 0.1,
+            shininess: 8.0,
+          },
+        },
+      ];
+      const sceneObjects = [...spheres, ...planes];
+
+      // --- Fungsi Ray Tracing di CPU ---
+      const EPSILON = 0.001;
+      // Fungsi intersectSphereJS & intersectPlaneJS (Sama)
+      function intersectSphereJS(rayOrigin, rayDir, sphere) {
+        /* ... Sama ... */
+        const oc = glMatrix.vec3.create();
+        glMatrix.vec3.subtract(oc, rayOrigin, sphere.center);
+        const b = 2.0 * glMatrix.vec3.dot(oc, rayDir);
+        const c = glMatrix.vec3.dot(oc, oc) - sphere.radius * sphere.radius;
+        const discriminant = b * b - 4.0 * c;
+        if (discriminant < 0.0) {
+          return -1.0;
+        } else {
+          const sqrtDiscriminant = Math.sqrt(discriminant);
+          const t0 = (-b - sqrtDiscriminant) / 2.0;
+          const t1 = (-b + sqrtDiscriminant) / 2.0;
+          if (t0 > EPSILON) return t0;
+          else if (t1 > EPSILON) return t1;
+          else return -1.0;
+        }
+      }
+      function intersectPlaneJS(rayOrigin, rayDir, plane) {
+        /* ... Sama ... */
+        const normal = plane.normal;
+        const point = plane.point;
+        const denom = glMatrix.vec3.dot(rayDir, normal);
+        if (Math.abs(denom) < EPSILON) {
+          return -1.0;
+        }
+        const oc = glMatrix.vec3.create();
+        glMatrix.vec3.subtract(oc, point, rayOrigin);
+        const t = glMatrix.vec3.dot(oc, normal) / denom;
+        return t > EPSILON ? t : -1.0;
+      }
+
+      // Fungsi utama untuk merender scene
+      function renderSceneCPU() {
+        const canvas = document.getElementById("cpu-canvas");
+        const ctx = canvas.getContext("2d");
+        // ... setup canvas/imageData sama ...
+        if (!ctx) {
+          console.error("Canvas 2D tidak tersedia.");
+          alert("Tidak bisa mendapatkan konteks Canvas 2D.");
+          return;
+        }
+        const width = canvas.width;
+        const height = canvas.height;
+        const aspectRatio = width / height;
+        const imageData = ctx.createImageData(width, height);
+        const data = imageData.data;
+
+        console.time("CPU Ray Trace Render MultiLightShadow");
+
+        // Vektor bantu
+        // ... (sebagian besar sama, beberapa mungkin perlu di dalam loop cahaya) ...
+        const rayDir = glMatrix.vec3.create();
+        const hitPoint = glMatrix.vec3.create();
+        const normal = glMatrix.vec3.create();
+        const viewDir = glMatrix.vec3.create();
+        const tempVec = glMatrix.vec3.create();
+        const objectBaseColor = glMatrix.vec3.create();
+        const shadowRayOrigin = glMatrix.vec3.create();
+        // Vektor yang akan dihitung per cahaya
+        const lightDir = glMatrix.vec3.create();
+        const reflectDir = glMatrix.vec3.create();
+        const diffuseTerm = glMatrix.vec3.create();
+        const specularTerm = glMatrix.vec3.create();
+        const finalColorVec = glMatrix.vec3.create(); // Akumulator warna akhir
+
+        // Loop piksel
+        for (let y = 0; y < height; ++y) {
+          for (let x = 0; x < width; ++x) {
+            // 1. Hitung Primary Ray (sama)
+            // ...
+            const ndcX = ((x + 0.5) / width) * 2.0 - 1.0;
+            const ndcY = (1.0 - (y + 0.5) / height) * 2.0 - 1.0;
+            glMatrix.vec3.set(rayDir, ndcX * aspectRatio, ndcY, -1.0);
+            glMatrix.vec3.subtract(rayDir, rayDir, cameraPos);
+            glMatrix.vec3.normalize(rayDir, rayDir);
+
+            // 2. Cari Perpotongan Primary Ray (sama)
+            // ...
+            let closest_t = Infinity;
+            let hitObject = null;
+            for (const obj of sceneObjects) {
+              let t = -1.0;
+              if (obj.type === "sphere") {
+                t = intersectSphereJS(cameraPos, rayDir, obj);
+              } else if (obj.type === "plane") {
+                t = intersectPlaneJS(cameraPos, rayDir, obj);
+              }
+              if (t > 0.0 && t < closest_t) {
+                closest_t = t;
+                hitObject = obj;
+              }
+            }
+
+            // 3. Hitung Warna
+            let finalR = backgroundColor[0];
+            let finalG = backgroundColor[1];
+            let finalB = backgroundColor[2];
+
+            if (hitObject) {
+              const mat = hitObject.material;
+
+              // Hitung titik potong & normal (sama)
+              glMatrix.vec3.scale(hitPoint, rayDir, closest_t);
+              glMatrix.vec3.add(hitPoint, cameraPos, hitPoint);
+              if (hitObject.type === "sphere") {
+                glMatrix.vec3.subtract(normal, hitPoint, hitObject.center);
+              } else if (hitObject.type === "plane") {
+                glMatrix.vec3.copy(normal, hitObject.normal);
+              }
+              glMatrix.vec3.normalize(normal, normal);
+
+              // Tentukan Warna Dasar Objek (Checkerboard atau Solid) (sama)
+              if (
+                hitObject.type === "plane" &&
+                mat.checkerColor1 &&
+                mat.checkerColor2
+              ) {
+                const scale = mat.checkerScale || 1.0;
+                const checkerSum =
+                  Math.floor(hitPoint[0] / scale) +
+                  Math.floor(hitPoint[2] / scale);
+                if (checkerSum % 2 !== 0) {
+                  glMatrix.vec3.copy(objectBaseColor, mat.checkerColor1);
+                } else {
+                  glMatrix.vec3.copy(objectBaseColor, mat.checkerColor2);
+                }
+              } else {
+                glMatrix.vec3.copy(objectBaseColor, mat.color);
+              }
+
+              // Hitung Vektor Pandang (viewDir) sekali saja
+              glMatrix.vec3.subtract(viewDir, cameraPos, hitPoint);
+              glMatrix.vec3.normalize(viewDir, viewDir);
+
+              // --- Akumulasi Pencahayaan ---
+              // Mulai dengan komponen Ambient Global
+              glMatrix.vec3.multiply(
+                finalColorVec,
+                globalAmbient,
+                objectBaseColor
+              );
+
+              // *** Loop melalui setiap sumber cahaya ***
+              for (const light of lights) {
+                // Hitung vektor spesifik untuk cahaya ini
+                glMatrix.vec3.subtract(lightDir, light.position, hitPoint);
+                const distanceToLight = glMatrix.vec3.length(lightDir);
+                glMatrix.vec3.normalize(lightDir, lightDir); // Normalisasi setelah hitung jarak
+
+                // Cek Bayangan untuk cahaya ini
+                let isInShadow = false;
+                glMatrix.vec3.scale(shadowRayOrigin, normal, EPSILON);
+                glMatrix.vec3.add(shadowRayOrigin, hitPoint, shadowRayOrigin);
+                for (const shadowObj of sceneObjects) {
+                  if (shadowObj === hitObject) continue;
+                  let t_shadow = -1.0;
+                  if (shadowObj.type === "sphere") {
+                    t_shadow = intersectSphereJS(
+                      shadowRayOrigin,
+                      lightDir,
+                      shadowObj
+                    );
+                  } else if (shadowObj.type === "plane") {
+                    t_shadow = intersectPlaneJS(
+                      shadowRayOrigin,
+                      lightDir,
+                      shadowObj
+                    );
+                  }
+                  if (t_shadow > 0.0 && t_shadow < distanceToLight) {
+                    isInShadow = true;
+                    break;
+                  }
+                }
+                const shadowFactor = isInShadow ? SHADOW_ATTENUATION : 1.0;
+
+                // Hitung Diffuse untuk cahaya ini (jika tidak di shadow)
+                glMatrix.vec3.set(diffuseTerm, 0, 0, 0); // Reset
+                const diffuseFactor = Math.max(
+                  0.0,
+                  glMatrix.vec3.dot(normal, lightDir)
+                );
+                if (diffuseFactor > 0.0) {
+                  // Hanya hitung jika permukaan menghadap cahaya
+                  glMatrix.vec3.multiply(tempVec, objectBaseColor, light.color); // Pakai warna cahaya ini
+                  glMatrix.vec3.scale(
+                    diffuseTerm,
+                    tempVec,
+                    diffuseFactor * shadowFactor
+                  );
+                }
+
+                // Hitung Specular untuk cahaya ini (jika tidak di shadow & menghadap cahaya)
+                glMatrix.vec3.set(specularTerm, 0, 0, 0); // Reset
+                if (diffuseFactor > 0.0) {
+                  // Specular butuh diffuse > 0
+                  // Hitung Refleksi untuk cahaya ini
+                  glMatrix.vec3.scale(tempVec, lightDir, -1);
+                  const dotNLReflection = glMatrix.vec3.dot(normal, tempVec);
+                  glMatrix.vec3.scale(
+                    reflectDir,
+                    normal,
+                    2.0 * dotNLReflection
+                  );
+                  glMatrix.vec3.subtract(reflectDir, tempVec, reflectDir);
+                  glMatrix.vec3.normalize(reflectDir, reflectDir);
+
+                  const specularFactor = Math.pow(
+                    Math.max(0.0, glMatrix.vec3.dot(reflectDir, viewDir)),
+                    mat.shininess
+                  );
+                  const specularIntensityFactor =
+                    mat.specularIntensity * shadowFactor;
+                  glMatrix.vec3.scale(
+                    specularTerm,
+                    light.color,
+                    specularIntensityFactor * specularFactor
+                  ); // Pakai warna cahaya ini
+                }
+
+                // Tambahkan kontribusi cahaya ini ke total
+                glMatrix.vec3.add(finalColorVec, finalColorVec, diffuseTerm);
+                glMatrix.vec3.add(finalColorVec, finalColorVec, specularTerm);
+              } // *** Akhir loop cahaya ***
+
+              // Clamp hasil akhir akumulasi
+              finalR = Math.min(1.0, Math.max(0.0, finalColorVec[0]));
+              finalG = Math.min(1.0, Math.max(0.0, finalColorVec[1]));
+              finalB = Math.min(1.0, Math.max(0.0, finalColorVec[2]));
+            } // Akhir if (hitObject)
+
+            // 4. Set Warna Piksel (sama)
+            // ...
+            const pixelIndex = (y * width + x) * 4;
+            data[pixelIndex] = Math.floor(finalR * 255);
+            data[pixelIndex + 1] = Math.floor(finalG * 255);
+            data[pixelIndex + 2] = Math.floor(finalB * 255);
+            data[pixelIndex + 3] = 255;
+          } // Akhir loop x
+        } // Akhir loop y
+
+        console.timeEnd("CPU Ray Trace Render MultiLightShadow");
+
+        // 5. Tampilkan Hasil (sama)
+        ctx.putImageData(imageData, 0, 0);
+        console.log("CPU Ray Tracing Multi-Light Shadow Selesai.");
+      }
+
+      window.onload = renderSceneCPU;
+    </script>
+  </body>
+</html>
