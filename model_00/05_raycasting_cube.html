@@ -1,0 +1,299 @@
+<!DOCTYPE html>
+<html lang="id">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Orbit Controls dengan Hover Model - Three.js</title>
+    <style>
+      body {
+        margin: 0;
+        overflow: hidden;
+        background-color: #111;
+      }
+      canvas {
+        display: block;
+      }
+      /* Hapus CSS untuk #instructions jika div-nya dihapus */
+    </style>
+  </head>
+  <body>
+    <!-- Hapus div #instructions jika tidak diperlukan lagi -->
+
+    <script type="importmap">
+      {
+        "imports": {
+          "three": "https://unpkg.com/three@0.160.0/build/three.module.js",
+          "three/addons/": "https://unpkg.com/three@0.160.0/examples/jsm/"
+        }
+      }
+    </script>
+
+    <script type="module">
+      import * as THREE from "three";
+      import { OrbitControls } from "three/addons/controls/OrbitControls.js"; // Impor OrbitControls
+
+      // Variabel utama
+      let scene, camera, renderer, controls; // Tambahkan controls untuk OrbitControls
+      let directionalLight;
+
+      const TARGET_MODEL_HEIGHT = 3;
+      const PLANE_OFFSET_Y = -0.5;
+      const DEFAULT_MODEL_COLOR = new THREE.Color(0xcccccc);
+      const HOVER_COLOR = new THREE.Color(0xffff00);
+
+      // Raycasting
+      const raycaster = new THREE.Raycaster();
+      const mouse = new THREE.Vector2(); // Untuk posisi mouse aktual
+      let interactiveObjects = [];
+      let currentlyHovered = null;
+
+      // --- MODUL INISIALISASI ---
+
+      function initScene() {
+        const sceneInstance = new THREE.Scene();
+        sceneInstance.background = new THREE.Color(0x111111);
+        sceneInstance.fog = new THREE.Fog(0x111111, 0, 150);
+        return sceneInstance;
+      }
+
+      function initCamera() {
+        const aspect = window.innerWidth / window.innerHeight;
+        const cameraInstance = new THREE.PerspectiveCamera(
+          60,
+          aspect,
+          0.1,
+          1000
+        ); // FOV kembali ke 60
+        cameraInstance.position.set(0, TARGET_MODEL_HEIGHT * 1.5, 18); // Posisi kamera untuk orbit
+        cameraInstance.lookAt(0, TARGET_MODEL_HEIGHT / 2, 0); // Lihat ke pusat scene
+        return cameraInstance;
+      }
+
+      function initRenderer() {
+        const rendererInstance = new THREE.WebGLRenderer({ antialias: true });
+        rendererInstance.setSize(window.innerWidth, window.innerHeight);
+        rendererInstance.setPixelRatio(window.devicePixelRatio);
+        rendererInstance.shadowMap.enabled = true;
+        rendererInstance.shadowMap.type = THREE.PCFSoftShadowMap;
+        document.body.appendChild(rendererInstance.domElement);
+        return rendererInstance;
+      }
+
+      // FUNGSI BARU/KEMBALIKAN UNTUK ORBITCONTROLS
+      function initOrbitControls(currentCamera, domElement) {
+        const controlsInstance = new OrbitControls(currentCamera, domElement);
+        controlsInstance.enableDamping = true;
+        controlsInstance.dampingFactor = 0.05;
+        controlsInstance.screenSpacePanning = true;
+        controlsInstance.minDistance = 3;
+        controlsInstance.maxDistance = 70;
+        controlsInstance.target.set(0, TARGET_MODEL_HEIGHT / 2, 0);
+        return controlsInstance;
+      }
+
+      // --- HANDLER EVENT UNTUK RAYCASTING DENGAN MOUSE ---
+      function onDocumentMouseMove(event) {
+        event.preventDefault();
+        // Normalisasi koordinat mouse dari (-1 sampai +1) untuk kedua sumbu
+        mouse.x = (event.clientX / window.innerWidth) * 2 - 1;
+        mouse.y = -(event.clientY / window.innerHeight) * 2 + 1;
+      }
+
+      // --- MODUL PEMBUATAN OBJEK (Definisi) ---
+      function createCubeDefinition() {
+        const size = TARGET_MODEL_HEIGHT;
+        const geometry = new THREE.BoxGeometry(size, size, size);
+        const material = new THREE.MeshPhongMaterial({
+          color: DEFAULT_MODEL_COLOR.clone(),
+          specular: new THREE.Color(0x222222),
+          shininess: 25,
+        });
+        const cubeInstance = new THREE.Mesh(geometry, material);
+        cubeInstance.castShadow = true;
+        cubeInstance.userData.originalColor = material.color.clone();
+        return {
+          object: cubeInstance,
+          shininess: 25,
+          width: size,
+          height: size,
+          name: "Cube",
+        };
+      }
+
+      function createSphereDefinition() {
+        const radius = TARGET_MODEL_HEIGHT / 2;
+        const geometry = new THREE.SphereGeometry(radius, 32, 16);
+        const material = new THREE.MeshPhongMaterial({
+          color: DEFAULT_MODEL_COLOR.clone(),
+          specular: new THREE.Color(0x555555),
+          shininess: 30,
+        });
+        const sphereInstance = new THREE.Mesh(geometry, material);
+        sphereInstance.castShadow = true;
+        sphereInstance.userData.originalColor = material.color.clone();
+        return {
+          object: sphereInstance,
+          shininess: 30,
+          width: radius * 2,
+          height: radius * 2,
+          name: "Sphere",
+        };
+      }
+
+      function createPyramidDefinition() {
+        const height = TARGET_MODEL_HEIGHT;
+        const baseDiameter = TARGET_MODEL_HEIGHT * 0.8;
+        const radius = baseDiameter / 2;
+        const geometry = new THREE.ConeGeometry(radius, height, 3);
+        const material = new THREE.MeshPhongMaterial({
+          color: DEFAULT_MODEL_COLOR.clone(),
+          specular: new THREE.Color(0x777777),
+          shininess: 100,
+        });
+        const pyramidInstance = new THREE.Mesh(geometry, material);
+        pyramidInstance.castShadow = true;
+        pyramidInstance.userData.originalColor = material.color.clone();
+        return {
+          object: pyramidInstance,
+          shininess: 100,
+          width: baseDiameter,
+          height: height,
+          name: "Pyramid",
+        };
+      }
+
+      function createGroundPlane() {
+        const planeSize = 100;
+        const geometry = new THREE.PlaneGeometry(planeSize, planeSize, 50, 50);
+        const material = new THREE.MeshPhongMaterial({
+          color: new THREE.Color(0x666666),
+          specular: 0x050505,
+          shininess: 5,
+        });
+        const planeMesh = new THREE.Mesh(geometry, material);
+        planeMesh.rotation.x = -Math.PI / 2;
+        planeMesh.position.y = PLANE_OFFSET_Y;
+        planeMesh.receiveShadow = true;
+        return planeMesh;
+      }
+
+      // --- MODUL PENCAHAYAAN ---
+      function setupLights(targetScene) {
+        const ambientLight = new THREE.AmbientLight(0x505050);
+        targetScene.add(ambientLight);
+        directionalLight = new THREE.DirectionalLight(0xffffff, 0.9);
+        directionalLight.position.set(15, 20, 10);
+        directionalLight.target.position.set(0, 0, 0);
+        targetScene.add(directionalLight.target);
+        directionalLight.castShadow = true;
+        const shadowCamSize = 25;
+        directionalLight.shadow.camera.left = -shadowCamSize;
+        directionalLight.shadow.camera.right = shadowCamSize;
+        directionalLight.shadow.camera.top = shadowCamSize;
+        directionalLight.shadow.camera.bottom = -shadowCamSize;
+        directionalLight.shadow.camera.near = 0.5;
+        directionalLight.shadow.camera.far = 100;
+        directionalLight.shadow.bias = -0.001;
+        directionalLight.shadow.mapSize.width = 2048;
+        directionalLight.shadow.mapSize.height = 2048;
+        targetScene.add(directionalLight);
+      }
+
+      // --- MODUL ANIMASI DAN INTERAKSI ---
+      function animate() {
+        requestAnimationFrame(animate);
+
+        if (controls) {
+          // Update OrbitControls
+          controls.update();
+        }
+
+        // Raycasting untuk Hover Effect menggunakan posisi mouse
+        raycaster.setFromCamera(mouse, camera); // Gunakan 'mouse' (posisi kursor)
+        const intersects = raycaster.intersectObjects(interactiveObjects);
+
+        if (intersects.length > 0) {
+          const firstIntersected = intersects[0].object;
+          if (currentlyHovered !== firstIntersected) {
+            if (currentlyHovered && currentlyHovered.userData.originalColor) {
+              currentlyHovered.material.color.copy(
+                currentlyHovered.userData.originalColor
+              );
+            }
+            currentlyHovered = firstIntersected;
+            currentlyHovered.material.color.copy(HOVER_COLOR);
+          }
+        } else {
+          if (currentlyHovered && currentlyHovered.userData.originalColor) {
+            currentlyHovered.material.color.copy(
+              currentlyHovered.userData.originalColor
+            );
+            currentlyHovered = null;
+          }
+        }
+
+        if (renderer && scene && camera) {
+          renderer.render(scene, camera);
+        }
+      }
+
+      function onWindowResize() {
+        if (camera && renderer) {
+          camera.aspect = window.innerWidth / window.innerHeight;
+          camera.updateProjectionMatrix();
+          renderer.setSize(window.innerWidth, window.innerHeight);
+        }
+      }
+
+      // --- MODUL SETUP DAN LAYOUT MODEL ---
+      function setupAndLayoutModels() {
+        interactiveObjects = [];
+        const modelDefs = [
+          createCubeDefinition(),
+          createSphereDefinition(),
+          createPyramidDefinition(),
+        ];
+        modelDefs.sort((a, b) => a.shininess - b.shininess);
+        const spacing = TARGET_MODEL_HEIGHT * 1.5;
+        let totalLayoutWidth = 0;
+        modelDefs.forEach((modelDef, index) => {
+          totalLayoutWidth += modelDef.width;
+          if (index < modelDefs.length - 1) totalLayoutWidth += spacing;
+        });
+        let currentX = -totalLayoutWidth / 2;
+        modelDefs.forEach((modelDef) => {
+          const modelObject = modelDef.object;
+          modelObject.position.x = currentX + modelDef.width / 2;
+          modelObject.position.y = modelDef.height / 2;
+          modelObject.position.z = -10;
+          scene.add(modelObject);
+          interactiveObjects.push(modelObject);
+          currentX += modelDef.width + spacing;
+        });
+      }
+
+      // --- FUNGSI UTAMA / TITIK MASUK ---
+      function main() {
+        scene = initScene();
+        camera = initCamera();
+        renderer = initRenderer();
+
+        // Inisialisasi OrbitControls
+        controls = initOrbitControls(camera, renderer.domElement);
+
+        setupLights(scene);
+        setupAndLayoutModels();
+
+        const groundPlane = createGroundPlane();
+        scene.add(groundPlane);
+
+        // Tambahkan event listener untuk mouse move (untuk raycasting)
+        document.addEventListener("mousemove", onDocumentMouseMove, false);
+
+        window.addEventListener("resize", onWindowResize, false);
+        animate();
+      }
+      main();
+    </script>
+  </body>
+</html>
