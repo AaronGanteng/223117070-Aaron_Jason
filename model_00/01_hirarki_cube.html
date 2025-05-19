@@ -3,7 +3,7 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>Hierarki Kubus (Induk Wireframe) - Three.js</title>
+    <title>Hierarki Kubus (Induk Wireframe, Anak Bola) - Three.js</title>
     <style>
       body {
         margin: 0;
@@ -29,7 +29,7 @@
 
       // Variabel utama
       let scene, camera, renderer;
-      let parentCube, childCube1, childCube2;
+      let parentCube, childSphere1, childSphere2; // Ubah nama variabel agar lebih deskriptif
 
       // --- MODUL INISIALISASI ---
 
@@ -67,40 +67,43 @@
       function createParentCube() {
         const geometry = new THREE.BoxGeometry(2.5, 2.5, 2.5);
         const materials = [
-          new THREE.MeshBasicMaterial({ color: 0xff0000, wireframe: true }), // kanan
-          new THREE.MeshBasicMaterial({ color: 0x00ff00, wireframe: true }), // kiri
-          new THREE.MeshBasicMaterial({ color: 0x0000ff, wireframe: true }), // atas
-          new THREE.MeshBasicMaterial({ color: 0xffff00, wireframe: true }), // bawah
-          new THREE.MeshBasicMaterial({ color: 0xff00ff, wireframe: true }), // depan
-          new THREE.MeshBasicMaterial({ color: 0x00ffff, wireframe: true }), // belakang
+          new THREE.MeshBasicMaterial({ color: 0xff0000, wireframe: true }),
+          new THREE.MeshBasicMaterial({ color: 0x00ff00, wireframe: true }),
+          new THREE.MeshBasicMaterial({ color: 0x0000ff, wireframe: true }),
+          new THREE.MeshBasicMaterial({ color: 0xffff00, wireframe: true }),
+          new THREE.MeshBasicMaterial({ color: 0xff00ff, wireframe: true }),
+          new THREE.MeshBasicMaterial({ color: 0x00ffff, wireframe: true }),
         ];
         const cubeInstance = new THREE.Mesh(geometry, materials);
         return cubeInstance;
       }
 
       /**
-       * Membuat mesh kubus anak pertama (solid).
-       * @returns {THREE.Mesh} Mesh kubus anak pertama.
+       * Membuat mesh bola anak pertama (solid).
+       * @returns {THREE.Mesh} Mesh bola anak pertama.
        */
-      function createFirstChildCube() {
-        const geometry = new THREE.BoxGeometry(0.8, 0.8, 0.8);
+      function createFirstChildSphere() {
+        // DIUBAH: Geometri menjadi SphereGeometry
+        // Parameter: radius, widthSegments, heightSegments
+        const geometry = new THREE.SphereGeometry(0.6, 32, 16); // Radius 0.6
         const material = new THREE.MeshBasicMaterial({ color: 0xffa500 }); // Oranye
-        const cubeInstance = new THREE.Mesh(geometry, material);
-        cubeInstance.position.x = 2.2;
-        return cubeInstance;
+        const sphereInstance = new THREE.Mesh(geometry, material);
+        sphereInstance.position.x = 2.2; // Posisi relatif terhadap induk
+        return sphereInstance;
       }
 
       /**
-       * Membuat mesh kubus anak kedua (solid).
-       * @returns {THREE.Mesh} Mesh kubus anak kedua.
+       * Membuat mesh bola anak kedua (solid).
+       * @returns {THREE.Mesh} Mesh bola anak kedua.
        */
-      function createSecondChildCube() {
-        const geometry = new THREE.BoxGeometry(0.6, 0.6, 0.6);
+      function createSecondChildSphere() {
+        // DIUBAH: Geometri menjadi SphereGeometry
+        const geometry = new THREE.SphereGeometry(0.45, 32, 16); // Radius 0.45 (sedikit lebih kecil)
         const material = new THREE.MeshBasicMaterial({ color: 0xadd8e6 }); // Biru muda
-        const cubeInstance = new THREE.Mesh(geometry, material);
-        cubeInstance.position.y = -2.0;
-        cubeInstance.position.x = 0.5;
-        return cubeInstance;
+        const sphereInstance = new THREE.Mesh(geometry, material);
+        sphereInstance.position.y = -2.0; // Posisi relatif terhadap induk
+        sphereInstance.position.x = 0.5; // Posisi relatif terhadap induk
+        return sphereInstance;
       }
 
       // --- MODUL ANIMASI DAN INTERAKSI ---
@@ -113,14 +116,15 @@
           parentCube.rotation.y += 0.005;
         }
 
-        if (childCube1) {
-          childCube1.rotation.y += 0.02;
-          childCube1.rotation.z -= 0.01;
+        if (childSphere1) {
+          // Bola bisa berputar juga, atau bisa juga tidak jika tidak diinginkan
+          childSphere1.rotation.y += 0.02;
+          // childSphere1.rotation.z -= 0.01; // Rotasi pada Z mungkin kurang terlihat pada bola
         }
 
-        if (childCube2) {
-          childCube2.rotation.x -= 0.015;
-          childCube2.rotation.y += 0.025;
+        if (childSphere2) {
+          // childSphere2.rotation.x -= 0.015; // Rotasi pada X mungkin kurang terlihat pada bola
+          childSphere2.rotation.y += 0.025;
         }
 
         if (renderer && scene && camera) {
@@ -142,11 +146,12 @@
         parentCube = createParentCube();
         scene.add(parentCube);
 
-        childCube1 = createFirstChildCube();
-        parentCube.add(childCube1);
+        // Gunakan fungsi baru untuk membuat bola
+        childSphere1 = createFirstChildSphere();
+        parentCube.add(childSphere1);
 
-        childCube2 = createSecondChildCube();
-        parentCube.add(childCube2);
+        childSphere2 = createSecondChildSphere();
+        parentCube.add(childSphere2);
       }
 
       // --- FUNGSI UTAMA / TITIK MASUK ---
