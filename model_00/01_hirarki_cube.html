@@ -1,0 +1,168 @@
+<!DOCTYPE html>
+<html lang="id">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Hierarki Kubus (Induk Wireframe) - Three.js</title>
+    <style>
+      body {
+        margin: 0;
+        overflow: hidden;
+        background-color: #111;
+      }
+      canvas {
+        display: block;
+      }
+    </style>
+  </head>
+  <body>
+    <script type="importmap">
+      {
+        "imports": {
+          "three": "https://unpkg.com/three@0.160.0/build/three.module.js"
+        }
+      }
+    </script>
+
+    <script type="module">
+      import * as THREE from "three";
+
+      // Variabel utama
+      let scene, camera, renderer;
+      let parentCube, childCube1, childCube2;
+
+      // --- MODUL INISIALISASI ---
+
+      function initScene() {
+        const sceneInstance = new THREE.Scene();
+        return sceneInstance;
+      }
+
+      function initCamera() {
+        const aspect = window.innerWidth / window.innerHeight;
+        const cameraInstance = new THREE.PerspectiveCamera(
+          75,
+          aspect,
+          0.1,
+          1000
+        );
+        cameraInstance.position.z = 8;
+        return cameraInstance;
+      }
+
+      function initRenderer() {
+        const rendererInstance = new THREE.WebGLRenderer({ antialias: true });
+        rendererInstance.setSize(window.innerWidth, window.innerHeight);
+        rendererInstance.setPixelRatio(window.devicePixelRatio);
+        document.body.appendChild(rendererInstance.domElement);
+        return rendererInstance;
+      }
+
+      // --- MODUL PEMBUATAN OBJEK ---
+
+      /**
+       * Membuat mesh kubus induk dengan sisi berwarna-warni dan wireframe.
+       * @returns {THREE.Mesh} Mesh kubus induk.
+       */
+      function createParentCube() {
+        const geometry = new THREE.BoxGeometry(2.5, 2.5, 2.5);
+        const materials = [
+          new THREE.MeshBasicMaterial({ color: 0xff0000, wireframe: true }), // kanan
+          new THREE.MeshBasicMaterial({ color: 0x00ff00, wireframe: true }), // kiri
+          new THREE.MeshBasicMaterial({ color: 0x0000ff, wireframe: true }), // atas
+          new THREE.MeshBasicMaterial({ color: 0xffff00, wireframe: true }), // bawah
+          new THREE.MeshBasicMaterial({ color: 0xff00ff, wireframe: true }), // depan
+          new THREE.MeshBasicMaterial({ color: 0x00ffff, wireframe: true }), // belakang
+        ];
+        const cubeInstance = new THREE.Mesh(geometry, materials);
+        return cubeInstance;
+      }
+
+      /**
+       * Membuat mesh kubus anak pertama (solid).
+       * @returns {THREE.Mesh} Mesh kubus anak pertama.
+       */
+      function createFirstChildCube() {
+        const geometry = new THREE.BoxGeometry(0.8, 0.8, 0.8);
+        const material = new THREE.MeshBasicMaterial({ color: 0xffa500 }); // Oranye
+        const cubeInstance = new THREE.Mesh(geometry, material);
+        cubeInstance.position.x = 2.2;
+        return cubeInstance;
+      }
+
+      /**
+       * Membuat mesh kubus anak kedua (solid).
+       * @returns {THREE.Mesh} Mesh kubus anak kedua.
+       */
+      function createSecondChildCube() {
+        const geometry = new THREE.BoxGeometry(0.6, 0.6, 0.6);
+        const material = new THREE.MeshBasicMaterial({ color: 0xadd8e6 }); // Biru muda
+        const cubeInstance = new THREE.Mesh(geometry, material);
+        cubeInstance.position.y = -2.0;
+        cubeInstance.position.x = 0.5;
+        return cubeInstance;
+      }
+
+      // --- MODUL ANIMASI DAN INTERAKSI ---
+
+      function animate() {
+        requestAnimationFrame(animate);
+
+        if (parentCube) {
+          parentCube.rotation.x += 0.005;
+          parentCube.rotation.y += 0.005;
+        }
+
+        if (childCube1) {
+          childCube1.rotation.y += 0.02;
+          childCube1.rotation.z -= 0.01;
+        }
+
+        if (childCube2) {
+          childCube2.rotation.x -= 0.015;
+          childCube2.rotation.y += 0.025;
+        }
+
+        if (renderer && scene && camera) {
+          renderer.render(scene, camera);
+        }
+      }
+
+      function onWindowResize() {
+        if (camera && renderer) {
+          camera.aspect = window.innerWidth / window.innerHeight;
+          camera.updateProjectionMatrix();
+          renderer.setSize(window.innerWidth, window.innerHeight);
+        }
+      }
+
+      // --- MODUL SETUP HIERARKI ---
+
+      function setupHierarchy() {
+        parentCube = createParentCube();
+        scene.add(parentCube);
+
+        childCube1 = createFirstChildCube();
+        parentCube.add(childCube1);
+
+        childCube2 = createSecondChildCube();
+        parentCube.add(childCube2);
+      }
+
+      // --- FUNGSI UTAMA / TITIK MASUK ---
+
+      function main() {
+        scene = initScene();
+        camera = initCamera();
+        renderer = initRenderer();
+
+        setupHierarchy();
+
+        window.addEventListener("resize", onWindowResize, false);
+        animate();
+      }
+
+      main();
+    </script>
+  </body>
+</html>

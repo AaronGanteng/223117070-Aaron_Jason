@@ -1,0 +1,146 @@
+<!DOCTYPE html>
+<html lang="id">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Kubus Multi-Warna Berputar - Three.js</title>
+    <style>
+      body {
+        margin: 0;
+        overflow: hidden; /* Mencegah scrollbar muncul */
+        background-color: #111; /* Warna latar belakang gelap */
+      }
+      canvas {
+        display: block; /* Menghilangkan sedikit ruang di bawah canvas */
+      }
+    </style>
+  </head>
+  <body>
+    <!-- Three.js akan membuat elemen canvas dan kita akan menambahkannya di sini -->
+
+    <script type="importmap">
+      {
+        "imports": {
+          "three": "https://unpkg.com/three@0.160.0/build/three.module.js"
+        }
+      }
+    </script>
+
+    <script type="module">
+      import * as THREE from "three";
+
+      // Variabel utama untuk scene, kamera, renderer, dan kubus
+      let scene, camera, renderer, cube;
+
+      // --- MODUL INISIALISASI ---
+
+      /**
+       * Menginisialisasi scene Three.js.
+       * @returns {THREE.Scene} Objek scene yang baru dibuat.
+       */
+      function initScene() {
+        const sceneInstance = new THREE.Scene();
+        return sceneInstance;
+      }
+
+      /**
+       * Menginisialisasi kamera perspektif.
+       * @returns {THREE.PerspectiveCamera} Objek kamera yang baru dibuat.
+       */
+      function initCamera() {
+        const aspect = window.innerWidth / window.innerHeight;
+        const cameraInstance = new THREE.PerspectiveCamera(
+          75,
+          aspect,
+          0.1,
+          1000
+        );
+        cameraInstance.position.z = 5; // Posisikan kamera sedikit ke belakang
+        return cameraInstance;
+      }
+
+      /**
+       * Menginisialisasi WebGLRenderer Three.js.
+       * @returns {THREE.WebGLRenderer} Objek renderer yang baru dibuat.
+       */
+      function initRenderer() {
+        const rendererInstance = new THREE.WebGLRenderer({ antialias: true });
+        rendererInstance.setSize(window.innerWidth, window.innerHeight);
+        rendererInstance.setPixelRatio(window.devicePixelRatio);
+        document.body.appendChild(rendererInstance.domElement);
+        return rendererInstance;
+      }
+
+      // --- MODUL PEMBUATAN OBJEK ---
+
+      /**
+       * Membuat mesh kubus dengan sisi berwarna-warni.
+       * @returns {THREE.Mesh} Mesh kubus yang baru dibuat.
+       */
+      function createCube() {
+        const geometry = new THREE.BoxGeometry(1.5, 1.5, 1.5);
+
+        // Buat array material, satu untuk setiap sisi kubus
+        // Urutan sisi untuk BoxGeometry: kanan, kiri, atas, bawah, depan, belakang
+        const materials = [
+          new THREE.MeshBasicMaterial({ color: 0xff0000 }), // Sisi kanan (merah)
+          new THREE.MeshBasicMaterial({ color: 0x00ff00 }), // Sisi kiri (hijau)
+          new THREE.MeshBasicMaterial({ color: 0x0000ff }), // Sisi atas (biru)
+          new THREE.MeshBasicMaterial({ color: 0xffff00 }), // Sisi bawah (kuning)
+          new THREE.MeshBasicMaterial({ color: 0xff00ff }), // Sisi depan (magenta)
+          new THREE.MeshBasicMaterial({ color: 0x00ffff }), // Sisi belakang (cyan)
+        ];
+
+        // Buat mesh dengan geometri dan array material
+        const cubeInstance = new THREE.Mesh(geometry, materials);
+        return cubeInstance;
+      }
+
+      // --- MODUL ANIMASI DAN INTERAKSI ---
+
+      /**
+       * Loop animasi utama.
+       */
+      function animate() {
+        requestAnimationFrame(animate);
+
+        if (cube) {
+          cube.rotation.x += 0.005;
+          cube.rotation.y += 0.005;
+        }
+
+        if (renderer && scene && camera) {
+          renderer.render(scene, camera);
+        }
+      }
+
+      /**
+       * Menangani perubahan ukuran jendela browser.
+       */
+      function onWindowResize() {
+        if (camera && renderer) {
+          camera.aspect = window.innerWidth / window.innerHeight;
+          camera.updateProjectionMatrix();
+          renderer.setSize(window.innerWidth, window.innerHeight);
+        }
+      }
+
+      // --- FUNGSI UTAMA / TITIK MASUK ---
+
+      /**
+       * Fungsi utama untuk menginisialisasi dan menjalankan aplikasi.
+       */
+      function main() {
+        scene = initScene();
+        camera = initCamera();
+        renderer = initRenderer();
+        cube = createCube();
+        scene.add(cube);
+        window.addEventListener("resize", onWindowResize, false);
+        animate();
+      }
+
+      main();
+    </script>
+  </body>
+</html>
