@@ -1,0 +1,485 @@
+<!DOCTYPE html>
+<html lang="id">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Walkthrough Controls (Langsung Aktif) - Three.js</title>
+    <style>
+      body {
+        margin: 0;
+        overflow: hidden;
+        background-color: #111;
+        color: white;
+        font-family: sans-serif;
+      }
+      canvas {
+        display: block;
+      }
+      #instructions {
+        position: absolute;
+        top: 10px; /* Pindahkan ke atas agar tidak menghalangi */
+        left: 50%;
+        transform: translateX(-50%);
+        text-align: center;
+        font-size: 1em; /* Kecilkan sedikit */
+        background-color: rgba(0, 0, 0, 0.7);
+        padding: 10px;
+        border-radius: 5px;
+        /* cursor: pointer; Dihapus karena tidak perlu klik di sini lagi */
+        z-index: 10; /* Pastikan di atas canvas */
+      }
+    </style>
+  </head>
+  <body>
+    <div id="instructions">
+      WASD = Gerak, Mouse = Lihat, ESC = Keluar dari kontrol
+    </div>
+
+    <script type="importmap">
+      {
+        "imports": {
+          "three": "https://unpkg.com/three@0.160.0/build/three.module.js"
+        }
+      }
+    </script>
+
+    <script type="module">
+      import * as THREE from "three";
+
+      // Variabel utama
+      let scene, camera, renderer;
+      let textureLoader, uvTexture;
+      let directionalLight;
+
+      const textureFileName = "uv_texture.png";
+      const TARGET_MODEL_HEIGHT = 3;
+      const PLANE_OFFSET_Y = -0.5;
+
+      let controlsEnabled = false;
+      const moveSpeed = 5.0;
+      const lookSpeed = 0.002;
+      const moveState = { forward: 0, right: 0 };
+      let euler = new THREE.Euler(0, 0, 0, "YXZ");
+      const PI_2 = Math.PI / 2;
+      const clock = new THREE.Clock();
+      let initialInteractionDone = false; // Flag untuk interaksi pertama
+
+      // --- MODUL INISIALISASI ---
+
+      function initScene() {
+        const sceneInstance = new THREE.Scene();
+        sceneInstance.background = new THREE.Color(0x111111);
+        sceneInstance.fog = new THREE.Fog(0x111111, 0, 150);
+        return sceneInstance;
+      }
+
+      function initCamera() {
+        const aspect = window.innerWidth / window.innerHeight;
+        const cameraInstance = new THREE.PerspectiveCamera(
+          75,
+          aspect,
+          0.1,
+          1000
+        );
+        cameraInstance.position.set(0, TARGET_MODEL_HEIGHT, 10);
+        return cameraInstance;
+      }
+
+      function initRenderer() {
+        const rendererInstance = new THREE.WebGLRenderer({ antialias: true });
+        rendererInstance.setSize(window.innerWidth, window.innerHeight);
+        rendererInstance.setPixelRatio(window.devicePixelRatio);
+        rendererInstance.shadowMap.enabled = true;
+        rendererInstance.shadowMap.type = THREE.PCFSoftShadowMap;
+        document.body.appendChild(rendererInstance.domElement);
+        return rendererInstance;
+      }
+
+      function attemptPointerLock() {
+        if (!controlsEnabled && !document.pointerLockElement) {
+          document.body
+            .requestPointerLock()
+            .then(() => {
+              console.log("Pointer lock dimintadengan sukses.");
+            })
+            .catch((err) => {
+              console.warn("Gagal meminta pointer lock secara otomatis:", err);
+              // Instruksi mungkin perlu ditampilkan lagi jika gagal
+              document.getElementById("instructions").style.display = "";
+            });
+        }
+      }
+
+      function initPointerLockControls() {
+        const instructions = document.getElementById("instructions");
+        const blocker = document.body;
+
+        // Listener untuk perubahan status pointer lock
+        document.addEventListener("pointerlockchange", () => {
+          if (document.pointerLockElement === blocker) {
+            controlsEnabled = true;
+            instructions.style.display = "none"; // Sembunyikan instruksi saat aktif
+            initialInteractionDone = true; // Tandai interaksi telah terjadi
+          } else {
+            controlsEnabled = false;
+            instructions.style.display = ""; // Tampilkan instruksi saat tidak aktif
+            moveState.forward = 0;
+            moveState.right = 0;
+          }
+        });
+
+        document.addEventListener("pointerlockerror", () => {
+          console.error("Pointer Lock Error");
+          instructions.style.display = "";
+        });
+
+        // Event listener utama
+        document.addEventListener("mousemove", onMouseMove);
+        document.addEventListener("keydown", onKeyDown);
+        document.addEventListener("keyup", onKeyUp);
+
+        // Coba aktifkan pointer lock saat mouse pertama kali bergerak di atas body
+        // atau saat tombol pertama ditekan
+        const firstInteractionHandler = () => {
+          if (!initialInteractionDone) {
+            attemptPointerLock();
+            // Hapus listener ini setelah interaksi pertama agar tidak terpanggil terus
+            // document.body.removeEventListener('mousemove', firstInteractionHandler, { once: true });
+            // document.removeEventListener('keydown', firstInteractionHandler, { once: true });
+          }
+        };
+
+        // Menggunakan { once: true } agar listener otomatis dihapus setelah dipanggil sekali
+        document.body.addEventListener("mousemove", firstInteractionHandler, {
+          once: true,
+        });
+        document.addEventListener("keydown", (event) => {
+          // Hanya proses jika keydown relevan (WASD) dan belum ada interaksi
+          if (
+            !initialInteractionDone &&
+            [
+              "KeyW",
+              "KeyA",
+              "KeyS",
+              "KeyD",
+              "ArrowUp",
+              "ArrowDown",
+              "ArrowLeft",
+              "ArrowRight",
+            ].includes(event.code)
+          ) {
+            firstInteractionHandler();
+          }
+          // Kemudian panggil onKeyDown normal
+          onKeyDown(event);
+        });
+
+        // Coba minta pointer lock segera setelah halaman dimuat,
+        // ini mungkin gagal di beberapa browser tanpa interaksi sebelumnya.
+        // window.addEventListener('load', () => {
+        //     setTimeout(attemptPointerLock, 100); // Beri sedikit waktu
+        // });
+        // Lebih baik mengandalkan interaksi pengguna pertama.
+      }
+
+      // --- HANDLER EVENT KONTROL ---
+      function onMouseMove(event) {
+        if (!controlsEnabled) return;
+        const movementX = event.movementX || 0;
+        const movementY = event.movementY || 0;
+        euler.setFromQuaternion(camera.quaternion);
+        euler.y -= movementX * lookSpeed;
+        euler.x -= movementY * lookSpeed;
+        euler.x = Math.max(-PI_2, Math.min(PI_2, euler.x));
+        camera.quaternion.setFromEuler(euler);
+      }
+
+      function onKeyDown(event) {
+        // Jika belum terkunci dan tombol adalah WASD, coba kunci
+        if (
+          !controlsEnabled &&
+          !document.pointerLockElement &&
+          [
+            "KeyW",
+            "KeyA",
+            "KeyS",
+            "KeyD",
+            "ArrowUp",
+            "ArrowDown",
+            "ArrowLeft",
+            "ArrowRight",
+          ].includes(event.code)
+        ) {
+          attemptPointerLock();
+        }
+
+        if (!controlsEnabled) return; // Hanya proses jika kontrol sudah aktif
+
+        switch (event.code) {
+          case "KeyW":
+          case "ArrowUp":
+            moveState.forward = 1;
+            break;
+          case "KeyS":
+          case "ArrowDown":
+            moveState.forward = -1;
+            break;
+          case "KeyA":
+          case "ArrowLeft":
+            moveState.right = -1;
+            break;
+          case "KeyD":
+          case "ArrowRight":
+            moveState.right = 1;
+            break;
+        }
+      }
+
+      function onKeyUp(event) {
+        switch (event.code) {
+          case "KeyW":
+          case "ArrowUp":
+            if (moveState.forward === 1) moveState.forward = 0;
+            break;
+          case "KeyS":
+          case "ArrowDown":
+            if (moveState.forward === -1) moveState.forward = 0;
+            break;
+          case "KeyA":
+          case "ArrowLeft":
+            if (moveState.right === -1) moveState.right = 0;
+            break;
+          case "KeyD":
+          case "ArrowRight":
+            if (moveState.right === 1) moveState.right = 0;
+            break;
+        }
+      }
+
+      function updatePlayerMovement(deltaTime) {
+        if (!controlsEnabled) return;
+        const moveDirection = new THREE.Vector3();
+        const rightDirection = new THREE.Vector3();
+        camera.getWorldDirection(moveDirection);
+        moveDirection.y = 0;
+        moveDirection.normalize();
+        rightDirection
+          .crossVectors(camera.up, moveDirection)
+          .normalize()
+          .negate();
+        let actualMoveSpeed = moveSpeed * deltaTime;
+        if (moveState.forward !== 0 && moveState.right !== 0)
+          actualMoveSpeed /= Math.sqrt(2);
+        if (moveState.forward > 0)
+          camera.position.addScaledVector(moveDirection, actualMoveSpeed);
+        if (moveState.forward < 0)
+          camera.position.addScaledVector(moveDirection, -actualMoveSpeed);
+        if (moveState.right > 0)
+          camera.position.addScaledVector(rightDirection, actualMoveSpeed);
+        if (moveState.right < 0)
+          camera.position.addScaledVector(rightDirection, -actualMoveSpeed);
+      }
+
+      function initTextures() {
+        /* ... (sama seperti sebelumnya) ... */
+        textureLoader = new THREE.TextureLoader();
+        uvTexture = textureLoader.load(
+          textureFileName,
+          function (texture) {
+            console.log("Tekstur dasar berhasil dimuat:", textureFileName);
+            texture.wrapS = THREE.RepeatWrapping;
+            texture.wrapT = THREE.RepeatWrapping;
+          },
+          undefined,
+          function (err) {
+            console.error("Gagal memuat tekstur dasar:", textureFileName, err);
+          }
+        );
+      }
+      function createCubeDefinition() {
+        /* ... (sama seperti sebelumnya) ... */
+        const size = TARGET_MODEL_HEIGHT;
+        const geometry = new THREE.BoxGeometry(size, size, size);
+        const emissiveIntensity = 0;
+        const material = new THREE.MeshPhongMaterial({
+          map: uvTexture,
+          color: new THREE.Color(0xffffff),
+          emissiveIntensity: emissiveIntensity,
+          specular: new THREE.Color(0x222222),
+          shininess: 25,
+        });
+        const cubeInstance = new THREE.Mesh(geometry, material);
+        cubeInstance.castShadow = true;
+        return {
+          object: cubeInstance,
+          shininess: 25,
+          width: size,
+          height: size,
+          name: "Cube",
+        };
+      }
+      function createSphereDefinition() {
+        /* ... (sama seperti sebelumnya) ... */
+        const radius = TARGET_MODEL_HEIGHT / 2;
+        const geometry = new THREE.SphereGeometry(radius, 32, 16);
+        const material = new THREE.MeshPhongMaterial({
+          map: uvTexture,
+          color: 0xffffff,
+          specular: new THREE.Color(0x555555),
+          shininess: 30,
+        });
+        const sphereInstance = new THREE.Mesh(geometry, material);
+        sphereInstance.castShadow = true;
+        return {
+          object: sphereInstance,
+          shininess: 30,
+          width: radius * 2,
+          height: radius * 2,
+          name: "Sphere",
+        };
+      }
+      function createPyramidDefinition() {
+        /* ... (sama seperti sebelumnya) ... */
+        const height = TARGET_MODEL_HEIGHT;
+        const baseDiameter = TARGET_MODEL_HEIGHT * 0.8;
+        const radius = baseDiameter / 2;
+        const geometry = new THREE.ConeGeometry(radius, height, 3);
+        const material = new THREE.MeshPhongMaterial({
+          map: uvTexture,
+          color: 0xffffff,
+          specular: new THREE.Color(0x777777),
+          shininess: 100,
+        });
+        const pyramidInstance = new THREE.Mesh(geometry, material);
+        pyramidInstance.castShadow = true;
+        return {
+          object: pyramidInstance,
+          shininess: 100,
+          width: baseDiameter,
+          height: height,
+          name: "Pyramid",
+        };
+      }
+      function createGroundPlane(baseTexture) {
+        /* ... (sama seperti sebelumnya) ... */
+        const planeSize = 100;
+        const geometry = new THREE.PlaneGeometry(planeSize, planeSize, 50, 50);
+        let planeTexture;
+        if (baseTexture && baseTexture.isTexture) {
+          planeTexture = baseTexture.clone();
+          planeTexture.needsUpdate = true;
+          planeTexture.wrapS = THREE.RepeatWrapping;
+          planeTexture.wrapT = THREE.RepeatWrapping;
+          planeTexture.repeat.set(40, 40);
+        }
+        const material = new THREE.MeshPhongMaterial({
+          map: planeTexture ? planeTexture : null,
+          color: planeTexture ? 0x888888 : 0x555555,
+          specular: 0x050505,
+          shininess: 5,
+        });
+        const planeMesh = new THREE.Mesh(geometry, material);
+        planeMesh.rotation.x = -Math.PI / 2;
+        planeMesh.position.y = PLANE_OFFSET_Y;
+        planeMesh.receiveShadow = true;
+        return planeMesh;
+      }
+      function setupLights(targetScene) {
+        /* ... (sama seperti sebelumnya) ... */
+        const ambientLight = new THREE.AmbientLight(0x404040);
+        targetScene.add(ambientLight);
+        directionalLight = new THREE.DirectionalLight(0xffffee, 0.9);
+        directionalLight.position.set(15, 20, 10);
+        directionalLight.target.position.set(0, 0, 0);
+        targetScene.add(directionalLight.target);
+        directionalLight.castShadow = true;
+        const shadowCamSize = 25;
+        directionalLight.shadow.camera.left = -shadowCamSize;
+        directionalLight.shadow.camera.right = shadowCamSize;
+        directionalLight.shadow.camera.top = shadowCamSize;
+        directionalLight.shadow.camera.bottom = -shadowCamSize;
+        directionalLight.shadow.camera.near = 0.5;
+        directionalLight.shadow.camera.far = 100;
+        directionalLight.shadow.bias = -0.001;
+        directionalLight.shadow.mapSize.width = 2048;
+        directionalLight.shadow.mapSize.height = 2048;
+        targetScene.add(directionalLight);
+      }
+      function animate() {
+        /* ... (sama seperti sebelumnya) ... */
+        requestAnimationFrame(animate);
+        const deltaTime = clock.getDelta();
+        updatePlayerMovement(deltaTime);
+        if (renderer && scene && camera) {
+          renderer.render(scene, camera);
+        }
+      }
+      function onWindowResize() {
+        /* ... (sama seperti sebelumnya) ... */
+        if (camera && renderer) {
+          camera.aspect = window.innerWidth / window.innerHeight;
+          camera.updateProjectionMatrix();
+          renderer.setSize(window.innerWidth, window.innerHeight);
+        }
+      }
+      function setupAndLayoutModels() {
+        /* ... (sama seperti sebelumnya) ... */
+        const modelDefs = [
+          createCubeDefinition(),
+          createSphereDefinition(),
+          createPyramidDefinition(),
+        ];
+        modelDefs.sort((a, b) => a.shininess - b.shininess);
+        const spacing = TARGET_MODEL_HEIGHT * 1.5;
+        let totalLayoutWidth = 0;
+        modelDefs.forEach((modelDef, index) => {
+          totalLayoutWidth += modelDef.width;
+          if (index < modelDefs.length - 1) totalLayoutWidth += spacing;
+        });
+        let currentX = -totalLayoutWidth / 2;
+        modelDefs.forEach((modelDef) => {
+          const modelObject = modelDef.object;
+          modelObject.position.x = currentX + modelDef.width / 2;
+          modelObject.position.y = modelDef.height / 2;
+          modelObject.position.z = -10;
+          scene.add(modelObject);
+          currentX += modelDef.width + spacing;
+        });
+      }
+
+      function main() {
+        scene = initScene();
+        camera = initCamera();
+        initTextures();
+        renderer = initRenderer();
+        initPointerLockControls(); // Inisialisasi kontrol
+        setupLights(scene);
+        setupAndLayoutModels();
+        if (uvTexture) {
+          // Cek sederhana, idealnya tunggu onLoad, atau gunakan fallback yang lebih baik
+          if (uvTexture.source && uvTexture.source.data) {
+            const groundPlane = createGroundPlane(uvTexture);
+            groundPlane.name = "groundPlane";
+            scene.add(groundPlane);
+          } else {
+            uvTexture.onUpdate = function () {
+              if (
+                uvTexture.source &&
+                uvTexture.source.data &&
+                !scene.getObjectByName("groundPlane")
+              ) {
+                const groundPlane = createGroundPlane(uvTexture);
+                groundPlane.name = "groundPlane";
+                scene.add(groundPlane);
+                uvTexture.onUpdate = null;
+              }
+            };
+          }
+        }
+        window.addEventListener("resize", onWindowResize, false);
+        animate();
+      }
+      main();
+    </script>
+  </body>
+</html>

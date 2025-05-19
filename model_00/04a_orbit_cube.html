@@ -1,0 +1,332 @@
+<!DOCTYPE html>
+<html lang="id">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Model dengan Bayangan (Tanpa Panah Cahaya) - Three.js</title>
+    <style>
+      body {
+        margin: 0;
+        overflow: hidden;
+        background-color: #111;
+      }
+      canvas {
+        display: block;
+      }
+    </style>
+  </head>
+  <body>
+    <script type="importmap">
+      {
+        "imports": {
+          "three": "https://unpkg.com/three@0.160.0/build/three.module.js",
+          "three/addons/": "https://unpkg.com/three@0.160.0/examples/jsm/"
+        }
+      }
+    </script>
+
+    <script type="module">
+      import * as THREE from "three";
+      import { OrbitControls } from "three/addons/controls/OrbitControls.js";
+
+      // Variabel utama
+      let scene, camera, renderer, controls;
+      let textureLoader, uvTexture;
+      let directionalLight; // Hapus arrowHelper dari deklarasi global
+
+      const textureFileName = "uv_texture.png";
+      const TARGET_MODEL_HEIGHT = 3;
+      const PLANE_OFFSET_Y = -0.5;
+
+      // --- MODUL INISIALISASI ---
+
+      function initScene() {
+        const sceneInstance = new THREE.Scene();
+        return sceneInstance;
+      }
+
+      function initCamera() {
+        const aspect = window.innerWidth / window.innerHeight;
+        const cameraInstance = new THREE.PerspectiveCamera(
+          60,
+          aspect,
+          0.1,
+          1000
+        );
+        cameraInstance.position.set(2, TARGET_MODEL_HEIGHT * 1.8, 18);
+        cameraInstance.lookAt(0, TARGET_MODEL_HEIGHT / 2, 0);
+        return cameraInstance;
+      }
+
+      function initRenderer() {
+        const rendererInstance = new THREE.WebGLRenderer({ antialias: true });
+        rendererInstance.setSize(window.innerWidth, window.innerHeight);
+        rendererInstance.setPixelRatio(window.devicePixelRatio);
+        rendererInstance.shadowMap.enabled = true;
+        rendererInstance.shadowMap.type = THREE.PCFSoftShadowMap;
+        document.body.appendChild(rendererInstance.domElement);
+        return rendererInstance;
+      }
+
+      function initControls(currentCamera, domElement) {
+        const controlsInstance = new OrbitControls(currentCamera, domElement);
+        controlsInstance.enableDamping = true;
+        controlsInstance.dampingFactor = 0.05;
+        controlsInstance.screenSpacePanning = true;
+        controlsInstance.minDistance = 3;
+        controlsInstance.maxDistance = 70;
+        controlsInstance.target.set(0, TARGET_MODEL_HEIGHT / 2, 0);
+        return controlsInstance;
+      }
+
+      function initTextures() {
+        textureLoader = new THREE.TextureLoader();
+        uvTexture = textureLoader.load(
+          textureFileName,
+          function (texture) {
+            console.log("Tekstur dasar berhasil dimuat:", textureFileName);
+            texture.wrapS = THREE.RepeatWrapping;
+            texture.wrapT = THREE.RepeatWrapping;
+          },
+          undefined,
+          function (err) {
+            console.error("Gagal memuat tekstur dasar:", textureFileName, err);
+          }
+        );
+      }
+
+      // --- MODUL PEMBUATAN OBJEK (Definisi) ---
+
+      function createCubeDefinition() {
+        const size = TARGET_MODEL_HEIGHT;
+        const geometry = new THREE.BoxGeometry(size, size, size);
+        const emissiveIntensity = 0;
+
+        const material = new THREE.MeshPhongMaterial({
+          map: uvTexture,
+          color: new THREE.Color(0xffffff),
+          emissiveIntensity: emissiveIntensity,
+          specular: new THREE.Color(0x222222),
+          shininess: 25,
+        });
+        const cubeInstance = new THREE.Mesh(geometry, material);
+        cubeInstance.castShadow = true;
+        return {
+          object: cubeInstance,
+          shininess: 25,
+          width: size,
+          height: size,
+          name: "Cube",
+        };
+      }
+
+      function createSphereDefinition() {
+        const radius = TARGET_MODEL_HEIGHT / 2;
+        const geometry = new THREE.SphereGeometry(radius, 32, 16);
+        const material = new THREE.MeshPhongMaterial({
+          map: uvTexture,
+          color: 0xffffff,
+          specular: new THREE.Color(0x555555),
+          shininess: 30,
+        });
+        const sphereInstance = new THREE.Mesh(geometry, material);
+        sphereInstance.castShadow = true;
+        return {
+          object: sphereInstance,
+          shininess: 30,
+          width: radius * 2,
+          height: radius * 2,
+          name: "Sphere",
+        };
+      }
+
+      function createPyramidDefinition() {
+        const height = TARGET_MODEL_HEIGHT;
+        const baseDiameter = TARGET_MODEL_HEIGHT * 0.8;
+        const radius = baseDiameter / 2;
+        const geometry = new THREE.ConeGeometry(radius, height, 3);
+        const material = new THREE.MeshPhongMaterial({
+          map: uvTexture,
+          color: 0xffffff,
+          specular: new THREE.Color(0x777777),
+          shininess: 100,
+        });
+        const pyramidInstance = new THREE.Mesh(geometry, material);
+        pyramidInstance.castShadow = true;
+        return {
+          object: pyramidInstance,
+          shininess: 100,
+          width: baseDiameter,
+          height: height,
+          name: "Pyramid",
+        };
+      }
+
+      function createGroundPlane(baseTexture) {
+        const planeSize = 50;
+        const geometry = new THREE.PlaneGeometry(planeSize, planeSize);
+
+        let planeTexture;
+        if (baseTexture && baseTexture.isTexture) {
+          planeTexture = baseTexture.clone();
+          planeTexture.needsUpdate = true;
+          planeTexture.wrapS = THREE.RepeatWrapping;
+          planeTexture.wrapT = THREE.RepeatWrapping;
+          planeTexture.repeat.set(20, 20);
+        }
+
+        const material = new THREE.MeshPhongMaterial({
+          map: planeTexture ? planeTexture : null,
+          color: planeTexture ? 0x999999 : 0x555555,
+          specular: 0x050505,
+          shininess: 5,
+        });
+
+        const planeMesh = new THREE.Mesh(geometry, material);
+        planeMesh.rotation.x = -Math.PI / 2;
+        planeMesh.position.y = PLANE_OFFSET_Y;
+        planeMesh.receiveShadow = true;
+        return planeMesh;
+      }
+
+      // --- MODUL PENCAHAYAAN ---
+      function setupLights(targetScene) {
+        const ambientLight = new THREE.AmbientLight(0x404040);
+        targetScene.add(ambientLight);
+
+        directionalLight = new THREE.DirectionalLight(0xffffee, 0.8);
+        directionalLight.position.set(8, 12, 10);
+        directionalLight.target.position.set(0, TARGET_MODEL_HEIGHT / 2, 0);
+        targetScene.add(directionalLight.target);
+        directionalLight.castShadow = true;
+
+        const shadowCamSize = 15;
+        directionalLight.shadow.camera.left = -shadowCamSize;
+        directionalLight.shadow.camera.right = shadowCamSize;
+        directionalLight.shadow.camera.top = shadowCamSize;
+        directionalLight.shadow.camera.bottom = -shadowCamSize;
+        directionalLight.shadow.camera.near = 1;
+        directionalLight.shadow.camera.far = 40;
+        directionalLight.shadow.bias = -0.001;
+        directionalLight.shadow.mapSize.width = 2048;
+        directionalLight.shadow.mapSize.height = 2048;
+        targetScene.add(directionalLight);
+
+        // HAPUS PEMBUATAN DAN PENAMBAHAN ARROW HELPER
+        // const dir = new THREE.Vector3().subVectors(directionalLight.target.position, directionalLight.position).normalize();
+        // const origin = directionalLight.position.clone();
+        // const length = directionalLight.position.distanceTo(directionalLight.target.position) * 1.2;
+        // const hexColor = 0xffff00;
+        // const headLength = Math.max(1, length * 0.1);
+        // const headWidth = Math.max(0.5, headLength * 0.5);
+        // if (arrowHelper) targetScene.remove(arrowHelper); // Tidak perlu jika arrowHelper tidak ada
+        // arrowHelper = new THREE.ArrowHelper(dir, origin, length, hexColor, headLength, headWidth);
+        // targetScene.add(arrowHelper);
+      }
+
+      // --- MODUL ANIMASI DAN INTERAKSI ---
+      function animate() {
+        requestAnimationFrame(animate);
+        if (controls) {
+          controls.update();
+        }
+        if (renderer && scene && camera) {
+          renderer.render(scene, camera);
+        }
+      }
+
+      function onWindowResize() {
+        if (camera && renderer) {
+          camera.aspect = window.innerWidth / window.innerHeight;
+          camera.updateProjectionMatrix();
+          renderer.setSize(window.innerWidth, window.innerHeight);
+          camera.lookAt(0, TARGET_MODEL_HEIGHT / 2, 0);
+          if (controls) controls.target.set(0, TARGET_MODEL_HEIGHT / 2, 0);
+        }
+      }
+
+      // --- MODUL SETUP DAN LAYOUT MODEL ---
+      function setupAndLayoutModels() {
+        const modelDefs = [
+          createCubeDefinition(),
+          createSphereDefinition(),
+          createPyramidDefinition(),
+        ];
+
+        modelDefs.sort((a, b) => a.shininess - b.shininess);
+
+        const spacing = TARGET_MODEL_HEIGHT * 0.7;
+        let totalLayoutWidth = 0;
+
+        modelDefs.forEach((modelDef, index) => {
+          totalLayoutWidth += modelDef.width;
+          if (index < modelDefs.length - 1) {
+            totalLayoutWidth += spacing;
+          }
+        });
+
+        let currentX = -totalLayoutWidth / 2;
+
+        modelDefs.forEach((modelDef) => {
+          const modelObject = modelDef.object;
+          modelObject.position.x = currentX + modelDef.width / 2;
+          modelObject.position.y = modelDef.height / 2;
+          modelObject.position.z = 0;
+          scene.add(modelObject);
+          currentX += modelDef.width + spacing;
+        });
+        console.log(
+          "Model yang telah di-layout (berdasarkan shininess):",
+          modelDefs.map((m) => `${m.name} (shininess: ${m.shininess})`)
+        );
+      }
+
+      // --- FUNGSI UTAMA / TITIK MASUK ---
+      function main() {
+        scene = initScene();
+        camera = initCamera();
+
+        initTextures();
+        renderer = initRenderer();
+        controls = initControls(camera, renderer.domElement);
+
+        setupLights(scene);
+        setupAndLayoutModels();
+
+        if (uvTexture && uvTexture.source && uvTexture.source.data) {
+          const groundPlane = createGroundPlane(uvTexture);
+          scene.add(groundPlane);
+        } else if (uvTexture) {
+          uvTexture.onUpdate = function () {
+            if (
+              uvTexture.source &&
+              uvTexture.source.data &&
+              !scene.children.find(
+                (child) =>
+                  child.geometry && child.geometry.type === "PlaneGeometry"
+              )
+            ) {
+              const groundPlane = createGroundPlane(uvTexture);
+              scene.add(groundPlane);
+              uvTexture.onUpdate = null;
+            }
+          };
+          if (!(uvTexture.source && uvTexture.source.data)) {
+            console.log("Menunggu tekstur dimuat untuk plane...");
+          }
+        } else {
+          console.warn(
+            "Objek uvTexture tidak ada saat mencoba membuat ground plane."
+          );
+          const groundPlane = createGroundPlane(null);
+          scene.add(groundPlane);
+        }
+
+        window.addEventListener("resize", onWindowResize, false);
+        animate();
+      }
+
+      main();
+    </script>
+  </body>
+</html>
