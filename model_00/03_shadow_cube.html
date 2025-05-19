@@ -3,9 +3,7 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>
-      Model dengan Bayangan & Visualisasi Cahaya (Dikembalikan) - Three.js
-    </title>
+    <title>Model dengan Bayangan (Kubus Tidak Emisif) - Three.js</title>
     <style>
       body {
         margin: 0;
@@ -34,7 +32,7 @@
       // Variabel utama
       let scene, camera, renderer, controls;
       let textureLoader, uvTexture;
-      let directionalLight, arrowHelper; // Kembalikan arrowHelper
+      let directionalLight, arrowHelper;
 
       const textureFileName = "uv_texture.png";
       const TARGET_MODEL_HEIGHT = 3;
@@ -64,11 +62,8 @@
         const rendererInstance = new THREE.WebGLRenderer({ antialias: true });
         rendererInstance.setSize(window.innerWidth, window.innerHeight);
         rendererInstance.setPixelRatio(window.devicePixelRatio);
-
-        // DIKEMBALIKAN: Pengaturan shadow map pada renderer
         rendererInstance.shadowMap.enabled = true;
         rendererInstance.shadowMap.type = THREE.PCFSoftShadowMap;
-
         document.body.appendChild(rendererInstance.domElement);
         return rendererInstance;
       }
@@ -105,32 +100,26 @@
       function createCubeDefinition() {
         const size = TARGET_MODEL_HEIGHT;
         const geometry = new THREE.BoxGeometry(size, size, size);
-        const sideProperties = [
-          { baseColor: 0xffdddd, emissiveColor: 0x330000 },
-          { baseColor: 0xddffdd, emissiveColor: 0x003300 },
-          { baseColor: 0xddddff, emissiveColor: 0x000033 },
-          { baseColor: 0xffffdd, emissiveColor: 0x333300 },
-          { baseColor: 0xffddff, emissiveColor: 0x330033 },
-          { baseColor: 0xddffff, emissiveColor: 0x003333 },
-        ];
-        const materials = sideProperties.map((props) => {
-          return new THREE.MeshPhongMaterial({
-            map: uvTexture,
-            color: new THREE.Color(props.baseColor),
-            emissive: new THREE.Color(props.emissiveColor),
-            specular: new THREE.Color(0x222222),
-            shininess: 15,
-          });
+
+        const emissiveIntensity = 0; // Emisi dinonaktifkan
+
+        const material = new THREE.MeshPhongMaterial({
+          map: uvTexture,
+          color: new THREE.Color(0xffffff), // Warna dasar kubus putih
+          // emissive: new THREE.Color(0x000000), // Bisa juga set emissive ke hitam
+          emissiveIntensity: emissiveIntensity,
+          specular: new THREE.Color(0x222222),
+          shininess: 25, // Nilai shininess normal untuk permukaan non-emisif
         });
-        const cubeInstance = new THREE.Mesh(geometry, materials);
-        cubeInstance.castShadow = true; // DIKEMBALIKAN: Kubus memberi bayangan
+        const cubeInstance = new THREE.Mesh(geometry, material);
+        cubeInstance.castShadow = true;
         return {
           object: cubeInstance,
-          shininess: 15,
+          shininess: 25,
           width: size,
           height: size,
           name: "Cube",
-        };
+        }; // Shininess disesuaikan
       }
 
       function createSphereDefinition() {
@@ -139,12 +128,11 @@
         const material = new THREE.MeshPhongMaterial({
           map: uvTexture,
           color: 0xffffff,
-          emissive: new THREE.Color(0x110000),
           specular: new THREE.Color(0x555555),
           shininess: 30,
         });
         const sphereInstance = new THREE.Mesh(geometry, material);
-        sphereInstance.castShadow = true; // DIKEMBALIKAN: Bola memberi bayangan
+        sphereInstance.castShadow = true;
         return {
           object: sphereInstance,
           shininess: 30,
@@ -162,12 +150,11 @@
         const material = new THREE.MeshPhongMaterial({
           map: uvTexture,
           color: 0xffffff,
-          emissive: new THREE.Color(0x000011),
           specular: new THREE.Color(0x777777),
           shininess: 100,
         });
         const pyramidInstance = new THREE.Mesh(geometry, material);
-        pyramidInstance.castShadow = true; // DIKEMBALIKAN: Piramida memberi bayangan
+        pyramidInstance.castShadow = true;
         return {
           object: pyramidInstance,
           shininess: 100,
@@ -180,37 +167,42 @@
       function createGroundPlane(baseTexture) {
         const planeSize = 50;
         const geometry = new THREE.PlaneGeometry(planeSize, planeSize);
-        const planeTexture = baseTexture.clone();
-        planeTexture.needsUpdate = true;
-        planeTexture.wrapS = THREE.RepeatWrapping;
-        planeTexture.wrapT = THREE.RepeatWrapping;
-        planeTexture.repeat.set(20, 20);
+
+        let planeTexture;
+        if (baseTexture && baseTexture.isTexture) {
+          planeTexture = baseTexture.clone();
+          planeTexture.needsUpdate = true;
+          planeTexture.wrapS = THREE.RepeatWrapping;
+          planeTexture.wrapT = THREE.RepeatWrapping;
+          planeTexture.repeat.set(20, 20);
+        }
+
         const material = new THREE.MeshPhongMaterial({
-          map: planeTexture,
-          color: 0x999999,
+          map: planeTexture ? planeTexture : null,
+          color: planeTexture ? 0x999999 : 0x555555,
           specular: 0x050505,
           shininess: 5,
         });
+
         const planeMesh = new THREE.Mesh(geometry, material);
         planeMesh.rotation.x = -Math.PI / 2;
         planeMesh.position.y = PLANE_OFFSET_Y;
-        planeMesh.receiveShadow = true; // DIKEMBALIKAN: Plane menerima bayangan
+        planeMesh.receiveShadow = true;
         return planeMesh;
       }
 
       // --- MODUL PENCAHAYAAN ---
       function setupLights(targetScene) {
-        const ambientLight = new THREE.AmbientLight(0x505050);
+        const ambientLight = new THREE.AmbientLight(0x404040);
         targetScene.add(ambientLight);
 
-        directionalLight = new THREE.DirectionalLight(0xffffee, 0.9);
+        directionalLight = new THREE.DirectionalLight(0xffffee, 0.8);
         directionalLight.position.set(8, 12, 10);
         directionalLight.target.position.set(0, TARGET_MODEL_HEIGHT / 2, 0);
         targetScene.add(directionalLight.target);
-
-        // DIKEMBALIKAN: Pengaturan shadow pada directionalLight
         directionalLight.castShadow = true;
-        const shadowCamSize = 12;
+
+        const shadowCamSize = 15;
         directionalLight.shadow.camera.left = -shadowCamSize;
         directionalLight.shadow.camera.right = shadowCamSize;
         directionalLight.shadow.camera.top = shadowCamSize;
@@ -220,14 +212,11 @@
         directionalLight.shadow.bias = -0.001;
         directionalLight.shadow.mapSize.width = 2048;
         directionalLight.shadow.mapSize.height = 2048;
-
         targetScene.add(directionalLight);
 
-        // DIKEMBALIKAN: Helper kamera bayangan (opsional, bisa di-uncomment untuk debug)
         // const shadowHelper = new THREE.CameraHelper(directionalLight.shadow.camera);
         // targetScene.add(shadowHelper);
 
-        // DIKEMBALIKAN: Pembuatan dan penambahan ArrowHelper
         const dir = new THREE.Vector3()
           .subVectors(
             directionalLight.target.position,
@@ -238,10 +227,12 @@
         const length =
           directionalLight.position.distanceTo(
             directionalLight.target.position
-          ) + 3;
-        const hexColor = 0xffff00; // Kuning
-        const headLength = 1;
-        const headWidth = 0.5;
+          ) * 1.2;
+        const hexColor = 0xffff00;
+        const headLength = Math.max(1, length * 0.1);
+        const headWidth = Math.max(0.5, headLength * 0.5);
+
+        if (arrowHelper) targetScene.remove(arrowHelper);
         arrowHelper = new THREE.ArrowHelper(
           dir,
           origin,
@@ -276,21 +267,31 @@
 
       // --- MODUL SETUP DAN LAYOUT MODEL ---
       function setupAndLayoutModels() {
+        // Buat ulang definisi model dengan shininess kubus yang mungkin baru
         const modelDefs = [
-          createCubeDefinition(),
-          createSphereDefinition(),
-          createPyramidDefinition(),
+          createCubeDefinition(), // Shininess kubus sekarang 25
+          createSphereDefinition(), // Shininess 30
+          createPyramidDefinition(), // Shininess 100
         ];
+
+        // Urutkan lagi berdasarkan shininess
         modelDefs.sort((a, b) => a.shininess - b.shininess);
+        // Urutan sekarang akan menjadi: Kubus (25), Bola (30), Piramida (100)
+        // Jika Anda ingin kubus tetap di posisi paling kiri, shininessnya harus < 30.
+        // Saya sudah set shininess kubus ke 25, jadi urutannya akan tetap sama.
+
         const spacing = TARGET_MODEL_HEIGHT * 0.7;
         let totalLayoutWidth = 0;
+
         modelDefs.forEach((modelDef, index) => {
           totalLayoutWidth += modelDef.width;
           if (index < modelDefs.length - 1) {
             totalLayoutWidth += spacing;
           }
         });
+
         let currentX = -totalLayoutWidth / 2;
+
         modelDefs.forEach((modelDef) => {
           const modelObject = modelDef.object;
           modelObject.position.x = currentX + modelDef.width / 2;
@@ -299,30 +300,52 @@
           scene.add(modelObject);
           currentX += modelDef.width + spacing;
         });
+        console.log(
+          "Model yang telah di-layout (berdasarkan shininess):",
+          modelDefs.map((m) => `${m.name} (shininess: ${m.shininess})`)
+        );
       }
 
       // --- FUNGSI UTAMA / TITIK MASUK ---
       function main() {
         scene = initScene();
         camera = initCamera();
+
         initTextures();
-        renderer = initRenderer(); // Renderer dibuat DENGAN shadow map aktif
+        renderer = initRenderer();
         controls = initControls(camera, renderer.domElement);
-        setupLights(scene); // Setup lampu DENGAN shadow dan ArrowHelper
+
+        setupLights(scene);
         setupAndLayoutModels();
 
-        const checkTextureInterval = setInterval(() => {
-          if (uvTexture && uvTexture.image) {
-            clearInterval(checkTextureInterval);
-            const groundPlane = createGroundPlane(uvTexture);
-            scene.add(groundPlane);
-          } else if (!uvTexture && document.readyState === "complete") {
-            clearInterval(checkTextureInterval);
-            console.warn(
-              "uvTexture tidak terdefinisi bahkan setelah dokumen siap, ground plane tidak dibuat."
-            );
+        if (uvTexture && uvTexture.source && uvTexture.source.data) {
+          const groundPlane = createGroundPlane(uvTexture);
+          scene.add(groundPlane);
+        } else if (uvTexture) {
+          uvTexture.onUpdate = function () {
+            if (
+              uvTexture.source &&
+              uvTexture.source.data &&
+              !scene.children.find(
+                (child) =>
+                  child.geometry && child.geometry.type === "PlaneGeometry"
+              )
+            ) {
+              const groundPlane = createGroundPlane(uvTexture);
+              scene.add(groundPlane);
+              uvTexture.onUpdate = null;
+            }
+          };
+          if (!(uvTexture.source && uvTexture.source.data)) {
+            console.log("Menunggu tekstur dimuat untuk plane...");
           }
-        }, 100);
+        } else {
+          console.warn(
+            "Objek uvTexture tidak ada saat mencoba membuat ground plane."
+          );
+          const groundPlane = createGroundPlane(null);
+          scene.add(groundPlane);
+        }
 
         window.addEventListener("resize", onWindowResize, false);
         animate();
