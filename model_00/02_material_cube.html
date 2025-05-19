@@ -3,7 +3,7 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>Model di Atas Plane (Dengan Jarak) - Three.js</title>
+    <title>Model Tanpa Bayangan & Visualisasi Cahaya - Three.js</title>
     <style>
       body {
         margin: 0;
@@ -32,10 +32,11 @@
       // Variabel utama
       let scene, camera, renderer, controls;
       let textureLoader, uvTexture;
+      let directionalLight; // ArrowHelper dihilangkan dari variabel global
 
       const textureFileName = "uv_texture.png";
       const TARGET_MODEL_HEIGHT = 3;
-      const PLANE_OFFSET_Y = -0.5; // Jarak antara alas model dan plane (nilai negatif untuk ke bawah)
+      const PLANE_OFFSET_Y = -0.5;
 
       // --- MODUL INISIALISASI ---
 
@@ -52,7 +53,7 @@
           0.1,
           1000
         );
-        cameraInstance.position.set(0, TARGET_MODEL_HEIGHT * 1.5, 15);
+        cameraInstance.position.set(2, TARGET_MODEL_HEIGHT * 1.8, 18);
         cameraInstance.lookAt(0, TARGET_MODEL_HEIGHT / 2, 0);
         return cameraInstance;
       }
@@ -71,7 +72,7 @@
         controlsInstance.dampingFactor = 0.05;
         controlsInstance.screenSpacePanning = true;
         controlsInstance.minDistance = 3;
-        controlsInstance.maxDistance = 60;
+        controlsInstance.maxDistance = 70;
         controlsInstance.target.set(0, TARGET_MODEL_HEIGHT / 2, 0);
         return controlsInstance;
       }
@@ -97,14 +98,20 @@
       function createCubeDefinition() {
         const size = TARGET_MODEL_HEIGHT;
         const geometry = new THREE.BoxGeometry(size, size, size);
-        const baseColorForSides = [
-          0xffdddd, 0xddffdd, 0xddddff, 0xffffdd, 0xffddff, 0xddffff,
+        const sideProperties = [
+          { baseColor: 0xffdddd, emissiveColor: 0x330000 },
+          { baseColor: 0xddffdd, emissiveColor: 0x003300 },
+          { baseColor: 0xddddff, emissiveColor: 0x000033 },
+          { baseColor: 0xffffdd, emissiveColor: 0x333300 },
+          { baseColor: 0xffddff, emissiveColor: 0x330033 },
+          { baseColor: 0xddffff, emissiveColor: 0x003333 },
         ];
-        const materials = baseColorForSides.map((colorValue) => {
+        const materials = sideProperties.map((props) => {
           return new THREE.MeshPhongMaterial({
             map: uvTexture,
-            color: new THREE.Color(colorValue),
-            specular: new THREE.Color(0x333333),
+            color: new THREE.Color(props.baseColor),
+            emissive: new THREE.Color(props.emissiveColor),
+            specular: new THREE.Color(0x222222),
             shininess: 15,
           });
         });
@@ -125,7 +132,7 @@
           map: uvTexture,
           color: 0xffffff,
           emissive: new THREE.Color(0x110000),
-          specular: new THREE.Color(0x777777),
+          specular: new THREE.Color(0x555555),
           shininess: 30,
         });
         const sphereInstance = new THREE.Mesh(geometry, material);
@@ -147,7 +154,7 @@
           map: uvTexture,
           color: 0xffffff,
           emissive: new THREE.Color(0x000011),
-          specular: new THREE.Color(0x999999),
+          specular: new THREE.Color(0x777777),
           shininess: 100,
         });
         const pyramidInstance = new THREE.Mesh(geometry, material);
@@ -167,30 +174,39 @@
         planeTexture.needsUpdate = true;
         planeTexture.wrapS = THREE.RepeatWrapping;
         planeTexture.wrapT = THREE.RepeatWrapping;
-        planeTexture.repeat.set(15, 15);
-
+        planeTexture.repeat.set(20, 20);
         const material = new THREE.MeshPhongMaterial({
           map: planeTexture,
-          color: 0xbbbbbb,
-          specular: 0x101010,
+          color: 0x999999,
+          specular: 0x050505,
           shininess: 5,
         });
-
         const planeMesh = new THREE.Mesh(geometry, material);
         planeMesh.rotation.x = -Math.PI / 2;
-        // DIUBAH: Atur posisi Y plane dengan offset
         planeMesh.position.y = PLANE_OFFSET_Y;
         return planeMesh;
       }
 
       // --- MODUL PENCAHAYAAN ---
       function setupLights(targetScene) {
-        const ambientLight = new THREE.AmbientLight(0x606060);
+        const ambientLight = new THREE.AmbientLight(0x505050);
         targetScene.add(ambientLight);
 
-        const directionalLight = new THREE.DirectionalLight(0xffffff, 1.0);
-        directionalLight.position.set(5, 10, 7.5);
+        directionalLight = new THREE.DirectionalLight(0xffffee, 0.9);
+        directionalLight.position.set(8, 12, 10);
+        directionalLight.target.position.set(0, TARGET_MODEL_HEIGHT / 2, 0);
+        targetScene.add(directionalLight.target);
         targetScene.add(directionalLight);
+
+        // DIHAPUS: Pembuatan dan penambahan ArrowHelper
+        // const dir = new THREE.Vector3().subVectors(directionalLight.target.position, directionalLight.position).normalize();
+        // const origin = directionalLight.position.clone();
+        // const length = directionalLight.position.distanceTo(directionalLight.target.position) + 3;
+        // const hexColor = 0xffff00;
+        // const headLength = 1;
+        // const headWidth = 0.5;
+        // arrowHelper = new THREE.ArrowHelper(dir, origin, length, hexColor, headLength, headWidth);
+        // targetScene.add(arrowHelper);
       }
 
       // --- MODUL ANIMASI DAN INTERAKSI ---
@@ -215,32 +231,25 @@
       }
 
       // --- MODUL SETUP DAN LAYOUT MODEL ---
-      // Model-model akan diletakkan dengan alasnya di Y=0
       function setupAndLayoutModels() {
         const modelDefs = [
           createCubeDefinition(),
           createSphereDefinition(),
           createPyramidDefinition(),
         ];
-
         modelDefs.sort((a, b) => a.shininess - b.shininess);
-
-        const spacing = TARGET_MODEL_HEIGHT * 0.5;
+        const spacing = TARGET_MODEL_HEIGHT * 0.7;
         let totalLayoutWidth = 0;
-
         modelDefs.forEach((modelDef, index) => {
           totalLayoutWidth += modelDef.width;
           if (index < modelDefs.length - 1) {
             totalLayoutWidth += spacing;
           }
         });
-
         let currentX = -totalLayoutWidth / 2;
-
         modelDefs.forEach((modelDef) => {
           const modelObject = modelDef.object;
           modelObject.position.x = currentX + modelDef.width / 2;
-          // Pastikan alas model di Y=0
           modelObject.position.y = modelDef.height / 2;
           modelObject.position.z = 0;
           scene.add(modelObject);
@@ -252,22 +261,24 @@
       function main() {
         scene = initScene();
         camera = initCamera();
+        initTextures();
         renderer = initRenderer();
         controls = initControls(camera, renderer.domElement);
-
-        initTextures();
         setupLights(scene);
-
-        // Atur model-model terlebih dahulu, pastikan alasnya di Y=0
         setupAndLayoutModels();
 
-        // Tambahkan ground plane dengan offset Y
-        if (uvTexture) {
-          const groundPlane = createGroundPlane(uvTexture);
-          scene.add(groundPlane);
-        } else {
-          console.warn("uvTexture belum siap saat membuat ground plane.");
-        }
+        const checkTextureInterval = setInterval(() => {
+          if (uvTexture && uvTexture.image) {
+            clearInterval(checkTextureInterval);
+            const groundPlane = createGroundPlane(uvTexture);
+            scene.add(groundPlane);
+          } else if (!uvTexture && document.readyState === "complete") {
+            clearInterval(checkTextureInterval);
+            console.warn(
+              "uvTexture tidak terdefinisi bahkan setelah dokumen siap, ground plane tidak dibuat."
+            );
+          }
+        }, 100);
 
         window.addEventListener("resize", onWindowResize, false);
         animate();

@@ -3,7 +3,9 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>Model dengan Bayangan dan Visualisasi Cahaya - Three.js</title>
+    <title>
+      Model dengan Bayangan & Visualisasi Cahaya (Dikembalikan) - Three.js
+    </title>
     <style>
       body {
         margin: 0;
@@ -32,7 +34,7 @@
       // Variabel utama
       let scene, camera, renderer, controls;
       let textureLoader, uvTexture;
-      let directionalLight, arrowHelper; // Variabel untuk cahaya dan helpernya
+      let directionalLight, arrowHelper; // Kembalikan arrowHelper
 
       const textureFileName = "uv_texture.png";
       const TARGET_MODEL_HEIGHT = 3;
@@ -53,7 +55,7 @@
           0.1,
           1000
         );
-        cameraInstance.position.set(2, TARGET_MODEL_HEIGHT * 1.8, 18); // Sedikit geser dan naikkan kamera
+        cameraInstance.position.set(2, TARGET_MODEL_HEIGHT * 1.8, 18);
         cameraInstance.lookAt(0, TARGET_MODEL_HEIGHT / 2, 0);
         return cameraInstance;
       }
@@ -63,9 +65,9 @@
         rendererInstance.setSize(window.innerWidth, window.innerHeight);
         rendererInstance.setPixelRatio(window.devicePixelRatio);
 
-        // AKTIFKAN SHADOW MAP DI RENDERER
+        // DIKEMBALIKAN: Pengaturan shadow map pada renderer
         rendererInstance.shadowMap.enabled = true;
-        rendererInstance.shadowMap.type = THREE.PCFSoftShadowMap; // Jenis shadow map (bisa juga PCFShadowMap, BasicShadowMap, VSMShadowMap)
+        rendererInstance.shadowMap.type = THREE.PCFSoftShadowMap;
 
         document.body.appendChild(rendererInstance.domElement);
         return rendererInstance;
@@ -77,7 +79,7 @@
         controlsInstance.dampingFactor = 0.05;
         controlsInstance.screenSpacePanning = true;
         controlsInstance.minDistance = 3;
-        controlsInstance.maxDistance = 70; // Izinkan zoom out lebih jauh
+        controlsInstance.maxDistance = 70;
         controlsInstance.target.set(0, TARGET_MODEL_HEIGHT / 2, 0);
         return controlsInstance;
       }
@@ -103,19 +105,25 @@
       function createCubeDefinition() {
         const size = TARGET_MODEL_HEIGHT;
         const geometry = new THREE.BoxGeometry(size, size, size);
-        const baseColorForSides = [
-          0xffdddd, 0xddffdd, 0xddddff, 0xffffdd, 0xffddff, 0xddffff,
+        const sideProperties = [
+          { baseColor: 0xffdddd, emissiveColor: 0x330000 },
+          { baseColor: 0xddffdd, emissiveColor: 0x003300 },
+          { baseColor: 0xddddff, emissiveColor: 0x000033 },
+          { baseColor: 0xffffdd, emissiveColor: 0x333300 },
+          { baseColor: 0xffddff, emissiveColor: 0x330033 },
+          { baseColor: 0xddffff, emissiveColor: 0x003333 },
         ];
-        const materials = baseColorForSides.map((colorValue) => {
+        const materials = sideProperties.map((props) => {
           return new THREE.MeshPhongMaterial({
             map: uvTexture,
-            color: new THREE.Color(colorValue),
-            specular: new THREE.Color(0x222222), // Kurangi specular agar tidak terlalu bersinar
+            color: new THREE.Color(props.baseColor),
+            emissive: new THREE.Color(props.emissiveColor),
+            specular: new THREE.Color(0x222222),
             shininess: 15,
           });
         });
         const cubeInstance = new THREE.Mesh(geometry, materials);
-        cubeInstance.castShadow = true; // Kubus memberi bayangan
+        cubeInstance.castShadow = true; // DIKEMBALIKAN: Kubus memberi bayangan
         return {
           object: cubeInstance,
           shininess: 15,
@@ -136,7 +144,7 @@
           shininess: 30,
         });
         const sphereInstance = new THREE.Mesh(geometry, material);
-        sphereInstance.castShadow = true; // Bola memberi bayangan
+        sphereInstance.castShadow = true; // DIKEMBALIKAN: Bola memberi bayangan
         return {
           object: sphereInstance,
           shininess: 30,
@@ -159,7 +167,7 @@
           shininess: 100,
         });
         const pyramidInstance = new THREE.Mesh(geometry, material);
-        pyramidInstance.castShadow = true; // Piramida memberi bayangan
+        pyramidInstance.castShadow = true; // DIKEMBALIKAN: Piramida memberi bayangan
         return {
           object: pyramidInstance,
           shininess: 100,
@@ -176,59 +184,50 @@
         planeTexture.needsUpdate = true;
         planeTexture.wrapS = THREE.RepeatWrapping;
         planeTexture.wrapT = THREE.RepeatWrapping;
-        planeTexture.repeat.set(20, 20); // Ulangi tekstur lebih banyak
-
+        planeTexture.repeat.set(20, 20);
         const material = new THREE.MeshPhongMaterial({
           map: planeTexture,
-          color: 0x999999, // Warna plane lebih gelap sedikit
+          color: 0x999999,
           specular: 0x050505,
           shininess: 5,
         });
-
         const planeMesh = new THREE.Mesh(geometry, material);
         planeMesh.rotation.x = -Math.PI / 2;
         planeMesh.position.y = PLANE_OFFSET_Y;
-        planeMesh.receiveShadow = true; // Plane menerima bayangan
+        planeMesh.receiveShadow = true; // DIKEMBALIKAN: Plane menerima bayangan
         return planeMesh;
       }
 
       // --- MODUL PENCAHAYAAN ---
       function setupLights(targetScene) {
-        const ambientLight = new THREE.AmbientLight(0x505050); // Cahaya ambient sedikit lebih redup
+        const ambientLight = new THREE.AmbientLight(0x505050);
         targetScene.add(ambientLight);
 
-        directionalLight = new THREE.DirectionalLight(0xffffee, 0.9); // Warna sedikit kuning, intensitas
-        directionalLight.position.set(8, 12, 10); // Atur posisi cahaya
-
-        // TARGET CAHAYA (PENTING UNTUK ARAH DAN BAYANGAN)
-        // Arahkan ke tengah area model
+        directionalLight = new THREE.DirectionalLight(0xffffee, 0.9);
+        directionalLight.position.set(8, 12, 10);
         directionalLight.target.position.set(0, TARGET_MODEL_HEIGHT / 2, 0);
-        targetScene.add(directionalLight.target); // Target harus ada di scene
+        targetScene.add(directionalLight.target);
 
-        // AKTIFKAN BAYANGAN UNTUK CAHAYA INI
+        // DIKEMBALIKAN: Pengaturan shadow pada directionalLight
         directionalLight.castShadow = true;
-
-        // KONFIGURASI KAMERA BAYANGAN (SANGAT PENTING UNTUK KUALITAS)
-        const shadowCamSize = 12; // Area yang dicakup kamera bayangan (sesuaikan!)
+        const shadowCamSize = 12;
         directionalLight.shadow.camera.left = -shadowCamSize;
         directionalLight.shadow.camera.right = shadowCamSize;
         directionalLight.shadow.camera.top = shadowCamSize;
         directionalLight.shadow.camera.bottom = -shadowCamSize;
         directionalLight.shadow.camera.near = 1;
-        directionalLight.shadow.camera.far = 40; // Sesuaikan far berdasarkan posisi cahaya dan scene
-        directionalLight.shadow.bias = -0.001; // Untuk mengatasi shadow acne (self-shadowing artifacts)
-
-        // RESOLUSI PETA BAYANGAN (KUALITAS vs PERFORMA)
-        directionalLight.shadow.mapSize.width = 2048; // Default 512
-        directionalLight.shadow.mapSize.height = 2048; // Default 512
+        directionalLight.shadow.camera.far = 40;
+        directionalLight.shadow.bias = -0.001;
+        directionalLight.shadow.mapSize.width = 2048;
+        directionalLight.shadow.mapSize.height = 2048;
 
         targetScene.add(directionalLight);
 
-        // OPSIONAL: Helper untuk melihat frustum kamera bayangan (untuk debugging)
+        // DIKEMBALIKAN: Helper kamera bayangan (opsional, bisa di-uncomment untuk debug)
         // const shadowHelper = new THREE.CameraHelper(directionalLight.shadow.camera);
         // targetScene.add(shadowHelper);
 
-        // BUAT ARROW HELPER UNTUK VISUALISASI ARAH CAHAYA
+        // DIKEMBALIKAN: Pembuatan dan penambahan ArrowHelper
         const dir = new THREE.Vector3()
           .subVectors(
             directionalLight.target.position,
@@ -239,11 +238,10 @@
         const length =
           directionalLight.position.distanceTo(
             directionalLight.target.position
-          ) + 3; // Panjang panah
-        const hexColor = 0xffff00; // Warna kuning
-        const headLength = 1; // Panjang kepala panah
-        const headWidth = 0.5; // Lebar kepala panah
-
+          ) + 3;
+        const hexColor = 0xffff00; // Kuning
+        const headLength = 1;
+        const headWidth = 0.5;
         arrowHelper = new THREE.ArrowHelper(
           dir,
           origin,
@@ -261,16 +259,6 @@
         if (controls) {
           controls.update();
         }
-
-        // Jika Anda ingin cahaya atau targetnya bergerak, ArrowHelper perlu diupdate
-        // if (arrowHelper && directionalLight) {
-        //     const dir = new THREE.Vector3().subVectors(directionalLight.target.position, directionalLight.position).normalize();
-        //     arrowHelper.setDirection(dir);
-        //     arrowHelper.position.copy(directionalLight.position);
-        //     const length = directionalLight.position.distanceTo(directionalLight.target.position) + 3;
-        //     arrowHelper.setLength(length, 1, 0.5); // headLength & headWidth
-        // }
-
         if (renderer && scene && camera) {
           renderer.render(scene, camera);
         }
@@ -293,21 +281,16 @@
           createSphereDefinition(),
           createPyramidDefinition(),
         ];
-
         modelDefs.sort((a, b) => a.shininess - b.shininess);
-
-        const spacing = TARGET_MODEL_HEIGHT * 0.7; // Perbesar spasi sedikit
+        const spacing = TARGET_MODEL_HEIGHT * 0.7;
         let totalLayoutWidth = 0;
-
         modelDefs.forEach((modelDef, index) => {
           totalLayoutWidth += modelDef.width;
           if (index < modelDefs.length - 1) {
             totalLayoutWidth += spacing;
           }
         });
-
         let currentX = -totalLayoutWidth / 2;
-
         modelDefs.forEach((modelDef) => {
           const modelObject = modelDef.object;
           modelObject.position.x = currentX + modelDef.width / 2;
@@ -322,24 +305,24 @@
       function main() {
         scene = initScene();
         camera = initCamera();
-
-        initTextures(); // Muat tekstur dulu
-
-        // PENTING: setupLights harus dipanggil SEBELUM renderer dibuat jika ingin renderer
-        // tahu tentang konfigurasi shadow map dari awal, TAPI renderer harus ada dulu
-        // untuk ditambahkan ke DOM. Urutan yang lebih aman:
-        renderer = initRenderer(); // Renderer dibuat dan shadow map diaktifkan
+        initTextures();
+        renderer = initRenderer(); // Renderer dibuat DENGAN shadow map aktif
         controls = initControls(camera, renderer.domElement);
-
-        setupLights(scene); // Setup lampu, termasuk konfigurasi shadow dan helper
+        setupLights(scene); // Setup lampu DENGAN shadow dan ArrowHelper
         setupAndLayoutModels();
 
-        if (uvTexture) {
-          const groundPlane = createGroundPlane(uvTexture);
-          scene.add(groundPlane);
-        } else {
-          console.warn("uvTexture belum siap saat membuat ground plane.");
-        }
+        const checkTextureInterval = setInterval(() => {
+          if (uvTexture && uvTexture.image) {
+            clearInterval(checkTextureInterval);
+            const groundPlane = createGroundPlane(uvTexture);
+            scene.add(groundPlane);
+          } else if (!uvTexture && document.readyState === "complete") {
+            clearInterval(checkTextureInterval);
+            console.warn(
+              "uvTexture tidak terdefinisi bahkan setelah dokumen siap, ground plane tidak dibuat."
+            );
+          }
+        }, 100);
 
         window.addEventListener("resize", onWindowResize, false);
         animate();
